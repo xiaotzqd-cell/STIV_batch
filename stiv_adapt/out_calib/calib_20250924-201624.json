@@ -1,0 +1,16 @@
+{
+  "image": "D:\\Programs\\Python\\stiv\\stiv_adapt\\CRR_calibration_image.jpg",
+  "points": [
+    [
+      100,
+      500
+    ],
+    [
+      1800,
+      520
+    ]
+  ],
+  "pixel_distance": 1700.1176429882728,
+  "real_distance_m": 49.38,
+  "scale_m_per_pixel": 0.029045048855093035
+}

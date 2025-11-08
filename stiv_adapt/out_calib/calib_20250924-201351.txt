@@ -1,0 +1,5 @@
+image=D:\Programs\Python\stiv\stiv_adapt\CRR_calibration_image.jpg
+p1=(443, 1321), p2=(3082, 1444)
+pixel_distance=2641.864872
+real_distance_m=49.380000
+scale_m_per_pixel=0.018691342
