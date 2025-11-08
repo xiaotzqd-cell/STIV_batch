@@ -20,25 +20,6 @@ from stiv_adapt.core import build_sti_from_frames, enhance_sti_via_fft_fan, comp
 
 vote_rho_step = 1
 
-def _apply_theta_filters_on_votes(votes_full: np.ndarray,
-                                  theta_axis: np.ndarray,
-                                  exclude_normals: List[float],
-                                  exclude_tol_deg: float,
-                                  theta_range: Tuple[float, float]) -> np.ndarray:
-    """对 votes_full 施加角度屏蔽与范围裁剪。"""
-    vf = votes_full.copy()
-    th_min, th_max = theta_range
-    valid = (theta_axis >= th_min) & (theta_axis < th_max)
-    vf[~valid] = 0
-    if exclude_normals and exclude_tol_deg >= 0:
-        for ang in exclude_normals:
-            # 距离最近等效角（周期 180）
-            dist = np.abs(((theta_axis - ang + 90.0) % 180.0) - 90.0)
-            mask = dist <= exclude_tol_deg
-            vf[mask] = 0
-    return vf
-
-
 def _draw_line_overlay(sti_u8: np.ndarray,
                        alpha_deg: float,
                        theta_normal_deg: float,
@@ -99,9 +80,6 @@ def adaptive_direction_search(video_path: str,
 
     t_total0 = time.perf_counter()
     angle_times: List[Dict[str, float]] = []
-    if vote_exclude_normals is None:
-        vote_exclude_normals = [45.0, 135.0]
-
     best: Dict[str, Any] = {
         "angle": None, "slope": None, "score": -1.0,
         "theta_fft": None, "sti_raw": None, "fps": fps, "angle_probe": None
@@ -137,13 +115,8 @@ def adaptive_direction_search(video_path: str,
         )
         rho_bins = int(np.floor((2 * rho_max) / vote_rho_step) + 1)
 
-        # 角度过滤
-        votes_filtered = _apply_theta_filters_on_votes(
-            votes_full, theta_axis,
-            exclude_normals=vote_exclude_normals,
-            exclude_tol_deg=vote_exclude_tol_deg,
-            theta_range=vote_theta_range
-        )
+        # 角度不过滤，直接使用原始票数
+        votes_filtered = votes_full
         if votes_filtered.sum() <= 0:
             #
             # 记录一行（无峰时，得分=0）
@@ -228,12 +201,7 @@ def adaptive_direction_search(video_path: str,
         total, angle_votes, votes_full, theta_axis, _, _ = hough_angle_voting_min(
             edges_best, theta_res_deg=vote_theta_res_deg, rho_step=1.0, k_ratio=float(vote_k_ratio)
         )
-        votes_filtered = _apply_theta_filters_on_votes(
-            votes_full, theta_axis,
-            exclude_normals=vote_exclude_normals,
-            exclude_tol_deg=vote_exclude_tol_deg,
-            theta_range=vote_theta_range
-        )
+        votes_filtered = votes_full
 
         if votes_filtered.sum() > 0:
             peak_idx = int(np.argmax(votes_filtered))
