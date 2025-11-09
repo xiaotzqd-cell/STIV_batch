@@ -2,7 +2,7 @@
 import os
 import math
 import cv2
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict
 from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 # ========== 用户配置区（按需修改） ==========
@@ -15,6 +15,10 @@ BANK_POINT: Tuple[int, int] = (623, 1040) # 岸边点（与 CENTER 组成测速�
 PROBE_INTERVAL_PX = 100 # 两测点之间的像素间隔（从中心点向两端延伸）
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 200
+USE_DYNAMIC_LINE_LENGTH = True  # ← 让测线长度随速度缩放
+DYNAMIC_LENGTH_REFERENCE_SPEED = 1.0  # 速度=1.0 m/s 时使用 LENGTH_PX
+DYNAMIC_LENGTH_MIN_PX = LENGTH_PX
+DYNAMIC_LENGTH_MAX_PX = LENGTH_PX * 3
 ANGLE_START, ANGLE_END, ANGLE_STEP = -120, -70, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 200
 USE_ROI = True
@@ -143,6 +147,87 @@ def save_flow_overlay(
         print(f"[overlay] {os.path.abspath(prev_path)} (preview)")
 
 
+def save_batch_overlays(
+    video_path: str,
+    outdir: str,
+    center: Tuple[int, int],
+    bank_point: Tuple[int, int],
+    batch_results: List[Dict[str, object]],
+    *,
+    m_per_px: Optional[float],
+    default_fps: Optional[float],
+) -> None:
+    """在首帧上绘制所有多点测速结果，并生成单点叠加图。"""
+
+    if not batch_results:
+        return
+
+    cap = cv2.VideoCapture(video_path)
+    ok, frame0 = cap.read()
+    cap.release()
+    if not ok:
+        print("[batch overlay] 无法读取首帧，跳过叠加图保存")
+        return
+
+    overview = frame0.copy()
+    cv2.line(overview, center, bank_point, (255, 255, 0), 2, cv2.LINE_AA)
+    cv2.circle(overview, center, 6, (0, 0, 255), -1, cv2.LINE_AA)
+    cv2.circle(overview, bank_point, 6, (0, 0, 255), -1, cv2.LINE_AA)
+
+    colors = [
+        (0, 255, 255),
+        (0, 165, 255),
+        (0, 255, 0),
+        (255, 0, 255),
+        (255, 0, 0),
+        (255, 255, 0),
+    ]
+
+    overlay_dir = os.path.join(outdir, "batch_overlays")
+    os.makedirs(overlay_dir, exist_ok=True)
+
+    for row in batch_results:
+        angle = row.get("angle_probe_deg")
+        if angle is None:
+            continue
+        idx = int(row.get("index", 0))
+        point = (int(row.get("point_x", 0)), int(row.get("point_y", 0)))
+        length = int(row.get("length_px", LENGTH_PX))
+        slope = row.get("slope_px_per_frame")
+        fps_here = row.get("fps") or default_fps
+        color = colors[idx % len(colors)]
+
+        (x1, y1, x2, y2), _ = _line_endpoints(point, length, angle)
+        cv2.line(overview, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
+        cv2.circle(overview, point, 4, color, -1, cv2.LINE_AA)
+
+        text = f"#{idx:02d}"
+        speed_val = row.get("speed_m_per_s")
+        if speed_val is not None:
+            text += f" {speed_val:.2f} m/s"
+        cv2.putText(overview, text, (point[0] + 10, point[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        filename = f"batch_point_{idx:02d}_overlay.png"
+        save_flow_overlay(
+            video_path=video_path,
+            outdir=overlay_dir,
+            center=point,
+            best_angle_deg=angle,
+            length_px=length,
+            slope_px_per_frame=slope,
+            m_per_px=m_per_px,
+            fps=fps_here,
+            calib_xyxy=None,
+            calib_real_m=None,
+            filename=filename,
+            preview_max_side=1280,
+        )
+
+    overview_path = os.path.join(overlay_dir, "batch_overview.png")
+    cv2.imwrite(overview_path, overview)
+    print(f"[batch overlay] {os.path.abspath(overview_path)}")
+
 def main():
     if not os.path.isfile(VIDEO):
         raise FileNotFoundError(f"视频不存在: {VIDEO}")
@@ -161,32 +246,55 @@ def main():
     else:
         print("[scale] 未提供比例尺；将仅输出像素单位的斜率，不计算 m/s")
 
-    # #多点测速
-    #     # 新增路径：多点测速
-    # if USE_BATCH_LINE_PROBING:
-    #     from stiv_adapt.search import batch_probe_along_line
-    #     batch_probe_along_line(
-    #         video_path=VIDEO,
-    #         center=CENTER,
-    #         bank_point=BANK_POINT,
-    #         interval_px=PROBE_INTERVAL_PX,
-    #         length_px=LENGTH_PX,
-    #         angle_range=(ANGLE_START, ANGLE_END, ANGLE_STEP),
-    #         max_frames=MAX_FRAMES,
-    #         m_per_px=m_per_px,
-    #         fps=FPS,
-    #         use_circular_roi=USE_ROI,
-    #         use_fft_fan_filter=USE_FFT_FAN,
-    #         fft_half_width_deg=FFT_HALF_DEG,
-    #         fft_rmin_ratio=FFT_RMIN_RATIO,
-    #         fft_rmax_ratio=FFT_RMAX_RATIO,
-    #         vote_theta_res_deg=VOTE_THETA_RES_DEG,
-    #         vote_k_ratio=VOTE_K_RATIO,
-    #         vote_exclude_normals=VOTE_EXCLUDE_NORMALS,
-    #         vote_exclude_tol_deg=VOTE_EXCLUDE_TOL_DEG,
-    #         vote_theta_range=VOTE_THETA_RANGE
-    #     )
-    #     return
+    if USE_BATCH_LINE_PROBING:
+        from stiv_adapt.search import batch_probe_along_line
+
+        results = batch_probe_along_line(
+            video_path=VIDEO,
+            center=CENTER,
+            bank_point=BANK_POINT,
+            interval_px=PROBE_INTERVAL_PX,
+            length_px=LENGTH_PX,
+            angle_range=(ANGLE_START, ANGLE_END, ANGLE_STEP),
+            max_frames=MAX_FRAMES,
+            m_per_px=m_per_px,
+            fps=FPS,
+            use_circular_roi=USE_ROI,
+            use_fft_fan_filter=USE_FFT_FAN,
+            fft_half_width_deg=FFT_HALF_DEG,
+            fft_rmin_ratio=FFT_RMIN_RATIO,
+            fft_rmax_ratio=FFT_RMAX_RATIO,
+            vote_theta_res_deg=VOTE_THETA_RES_DEG,
+            vote_k_ratio=VOTE_K_RATIO,
+            vote_exclude_normals=VOTE_EXCLUDE_NORMALS,
+            vote_exclude_tol_deg=VOTE_EXCLUDE_TOL_DEG,
+            vote_theta_range=VOTE_THETA_RANGE,
+            use_dynamic_length=USE_DYNAMIC_LINE_LENGTH,
+            length_speed_reference=DYNAMIC_LENGTH_REFERENCE_SPEED,
+            min_length_px=DYNAMIC_LENGTH_MIN_PX,
+            max_length_px=DYNAMIC_LENGTH_MAX_PX,
+            verbose=VERBOSE,
+        )
+
+        print("\n====== 多点测速结果 ======")
+        for row in results:
+            speed_txt = "N/A" if row["speed_m_per_s"] is None else f"{row['speed_m_per_s']:.4f} m/s"
+            print(
+                f"#{row['index']:02d} pt=({row['point_x']},{row['point_y']}) "
+                f"len={row['length_px']}px angle={row['angle_probe_deg']}° "
+                f"slope={row['slope_px_per_frame']} px/frame speed={speed_txt} score={row['score']}"
+            )
+
+        save_batch_overlays(
+            video_path=VIDEO,
+            outdir=outdir,
+            center=CENTER,
+            bank_point=BANK_POINT,
+            batch_results=results,
+            m_per_px=m_per_px,
+            default_fps=FPS if FPS is not None else (results[0].get("fps") if results else None),
+        )
+        return
 
 
     # 自适应方向搜索（内部：构建STI → 可选FFT扇形增强 → Canny → 角度投票霍夫）

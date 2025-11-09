@@ -5,9 +5,11 @@ core.py — STI 的构建、FFT 扇形滤波增强、以及 Canny+Hough 评分
 """
 import os, math, time
 from typing import Tuple, List, Optional, Dict
+from contextlib import contextmanager
+
 import cv2
 import numpy as np
-from typing import Tuple, Optional
+
 from .vote_accumulator import hough_angle_voting_min  # 相对导入
 
 # === 输出目录管理 ===
@@ -21,6 +23,22 @@ def init_debug_dir(base: str = "out", tag: str = "") -> str:
     DEBUG_RUN_DIR = os.path.join(base, name)
     _ensure_dir(DEBUG_RUN_DIR)
     return DEBUG_RUN_DIR
+
+
+@contextmanager
+def push_debug_dir(suffix: str):
+    """Temporarily descend into a sub-directory under the current DEBUG_RUN_DIR."""
+    global DEBUG_RUN_DIR
+    prev = DEBUG_RUN_DIR
+    subdir = None
+    if DEBUG_RUN_DIR:
+        subdir = os.path.join(DEBUG_RUN_DIR, suffix)
+        _ensure_dir(subdir)
+        DEBUG_RUN_DIR = subdir
+    try:
+        yield subdir
+    finally:
+        DEBUG_RUN_DIR = prev
 def _save_img(name: str, img: np.ndarray) -> str:
     if DEBUG_RUN_DIR is None:
         init_debug_dir()
