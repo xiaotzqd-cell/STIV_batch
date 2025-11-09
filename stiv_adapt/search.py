@@ -445,22 +445,65 @@ def batch_probe_along_line(
 
     frame_shape = frames[0].shape[:2]
     probe_points = _calculate_extended_line(center, bank_point, interval_px, frame_shape)
-    frame_count = len(frames)
 
     results: List[Dict[str, Any]] = []
     excel_path = "batch_probe_results.xlsx"
-    if DEBUG_RUN_DIR:
-        excel_path = os.path.join(DEBUG_RUN_DIR, excel_path)
+    try:
+        from .core import DEBUG_RUN_DIR
+        if DEBUG_RUN_DIR:
+            excel_path = os.path.join(DEBUG_RUN_DIR, excel_path)
+    except Exception:
+        pass
 
     for idx, point in enumerate(probe_points):
-        subdir_name = f"batch_point_{idx:02d}_{point[0]}x{point[1]}"
-        final_debug_dir = None
-        with push_debug_dir(subdir_name) as subdir_path:
+        best = _adaptive_direction_search_on_frames(
+            frames,
+            video_fps,
+            point,
+            length_px,
+            angle_start,
+            angle_end,
+            angle_step,
+            use_circular_roi=use_circular_roi,
+            use_fft_fan_filter=use_fft_fan_filter,
+            fft_half_width_deg=fft_half_width_deg,
+            fft_rmin_ratio=fft_rmin_ratio,
+            fft_rmax_ratio=fft_rmax_ratio,
+            verbose=verbose,
+            vote_theta_res_deg=vote_theta_res_deg,
+            vote_k_ratio=vote_k_ratio,
+            vote_exclude_normals=vote_exclude_normals,
+            vote_exclude_tol_deg=vote_exclude_tol_deg,
+            vote_theta_range=vote_theta_range,
+            save_candidate_overlays=False,
+        )
+
+        if fps is not None:
+            best["fps"] = float(fps)
+        elif effective_fps:
+            best["fps"] = float(effective_fps)
+
+        slope = best.get("slope")
+        best_fps = best.get("fps")
+        speed_m_per_s = None
+        if slope is not None and m_per_px is not None and best_fps:
+            speed_m_per_s = abs(slope) * m_per_px * float(best_fps)
+
+        dynamic_length = _compute_dynamic_length(
+            length_px,
+            speed_m_per_s,
+            enable=use_dynamic_length,
+            ref_speed=length_speed_reference,
+            min_length_px=min_length_px,
+            max_length_px=max_length_px,
+        )
+
+        if dynamic_length != length_px:
             best = _adaptive_direction_search_on_frames(
                 frames,
                 video_fps,
                 point,
-                length_px,
+                dynamic_length,
                 angle_start,
                 angle_end,
                 angle_step,
@@ -477,62 +520,13 @@ def batch_probe_along_line(
                 vote_theta_range=vote_theta_range,
                 save_candidate_overlays=False,
             )
-
             if fps is not None:
                 best["fps"] = float(fps)
             elif effective_fps:
                 best["fps"] = float(effective_fps)
-
             slope = best.get("slope")
-            best_fps = best.get("fps")
-            speed_m_per_s = None
-            if slope is not None and m_per_px is not None and best_fps:
-                speed_m_per_s = abs(slope) * m_per_px * float(best_fps)
-
-            dynamic_length = _compute_dynamic_length(
-                length_px,
-                speed_m_per_s,
-                enable=use_dynamic_length,
-                ref_speed=length_speed_reference,
-                min_length_px=min_length_px,
-                max_length_px=max_length_px,
-            )
-            dynamic_length = max(2, min(dynamic_length, frame_count))
-
-            final_debug_dir = subdir_path
-
-            if dynamic_length != length_px:
-                dyn_suffix = f"{subdir_name}_len{dynamic_length}"
-                with push_debug_dir(dyn_suffix) as dyn_dir:
-                    best = _adaptive_direction_search_on_frames(
-                        frames,
-                        video_fps,
-                        point,
-                        dynamic_length,
-                        angle_start,
-                        angle_end,
-                        angle_step,
-                        use_circular_roi=use_circular_roi,
-                        use_fft_fan_filter=use_fft_fan_filter,
-                        fft_half_width_deg=fft_half_width_deg,
-                        fft_rmin_ratio=fft_rmin_ratio,
-                        fft_rmax_ratio=fft_rmax_ratio,
-                        verbose=verbose,
-                        vote_theta_res_deg=vote_theta_res_deg,
-                        vote_k_ratio=vote_k_ratio,
-                        vote_exclude_normals=vote_exclude_normals,
-                        vote_exclude_tol_deg=vote_exclude_tol_deg,
-                        vote_theta_range=vote_theta_range,
-                        save_candidate_overlays=False,
-                    )
-                    if fps is not None:
-                        best["fps"] = float(fps)
-                    elif effective_fps:
-                        best["fps"] = float(effective_fps)
-                    slope = best.get("slope")
-                    if slope is not None and m_per_px is not None and best.get("fps"):
-                        speed_m_per_s = abs(slope) * m_per_px * float(best["fps"])
-                    final_debug_dir = dyn_dir or subdir_path
+            if slope is not None and m_per_px is not None and best.get("fps"):
+                speed_m_per_s = abs(slope) * m_per_px * float(best["fps"])
 
         result_row = {
             "index": idx,
@@ -544,8 +538,6 @@ def batch_probe_along_line(
             "speed_m_per_s": speed_m_per_s,
             "length_px": dynamic_length,
             "score": best.get("score"),
-            "fps": best.get("fps"),
-            "debug_dir": final_debug_dir,
         }
         results.append(result_row)
 

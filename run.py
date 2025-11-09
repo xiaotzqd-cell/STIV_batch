@@ -17,7 +17,7 @@ PROBE_INTERVAL_PX = 100 # 两测点之间的像素间隔（从中心点向两端
 LENGTH_PX = 200
 USE_DYNAMIC_LINE_LENGTH = True  # ← 让测线长度随速度缩放
 DYNAMIC_LENGTH_REFERENCE_SPEED = 1.0  # 速度=1.0 m/s 时使用 LENGTH_PX
-DYNAMIC_LENGTH_MIN_PX = LENGTH_PX
+DYNAMIC_LENGTH_MIN_PX = max(16, LENGTH_PX // 2)
 DYNAMIC_LENGTH_MAX_PX = LENGTH_PX * 3
 ANGLE_START, ANGLE_END, ANGLE_STEP = -120, -70, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 200
@@ -284,16 +284,6 @@ def main():
                 f"len={row['length_px']}px angle={row['angle_probe_deg']}° "
                 f"slope={row['slope_px_per_frame']} px/frame speed={speed_txt} score={row['score']}"
             )
-
-        save_batch_overlays(
-            video_path=VIDEO,
-            outdir=outdir,
-            center=CENTER,
-            bank_point=BANK_POINT,
-            batch_results=results,
-            m_per_px=m_per_px,
-            default_fps=FPS if FPS is not None else (results[0].get("fps") if results else None),
-        )
         return
 
 
