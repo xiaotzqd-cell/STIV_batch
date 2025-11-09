@@ -9,7 +9,6 @@ import math, time
 import csv,os
 import pandas as pd
 from .core import (
-    init_debug_dir,
     build_sti_from_frames,
     enhance_sti_via_fft_fan,
     compute_canny_edges,
@@ -60,50 +59,64 @@ def _draw_line_overlay(sti_u8: np.ndarray,
     cv2.imwrite(save_name, vis)
 
 
-def adaptive_direction_search(video_path: str,
-                              center: Tuple[int, int],
-                              length_px: int,
-                              angle_start: float, angle_end: float, angle_step: float,
-                              max_frames: int = 300,
-                              use_circular_roi: bool = False,
-                              use_fft_fan_filter: bool = True,
-                              fft_half_width_deg: float = 4.0,
-                              fft_rmin_ratio: float = 0.05,
-                              fft_rmax_ratio: float = 1.0,
-                              verbose: bool = False,
-                              vote_theta_res_deg: float = 0.5,
-                              vote_k_ratio: float = 0.55,
-                              vote_exclude_normals: Optional[List[float]] = None,
-                              vote_exclude_tol_deg: float = 0.6,
-                              vote_theta_range: Tuple[float, float] = (0.0, 180.0),
-                              save_candidate_overlays: bool = False
-                              ) -> Dict[str, Any]:
-    # 读取灰度帧
+def _load_video_frames(video_path: str, max_frames: int) -> Tuple[List[np.ndarray], float]:
+    """读取视频帧并返回灰度帧列表及 FPS。"""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"无法打开视频: {video_path}")
-    fps = float(cap.get(cv2.CAP_PROP_FPS)) or 30.0
+    fps = float(cap.get(cv2.CAP_PROP_FPS))
+    if not fps or math.isinf(fps) or math.isnan(fps):
+        fps = 30.0
     frames: List[np.ndarray] = []
     count = 0
-    probe_rows = []
     while True:
         ok, frame = cap.read()
         if not ok or (max_frames > 0 and count >= max_frames):
             break
-        g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        frames.append(g); count += 1
+        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+        count += 1
     cap.release()
-    if len(frames) == 0:
+    if not frames:
         raise RuntimeError("读取到 0 帧")
+    return frames, fps
 
+
+def _adaptive_direction_search_on_frames(
+    frames: List[np.ndarray],
+    fps: float,
+    center: Tuple[int, int],
+    length_px: int,
+    angle_start: float,
+    angle_end: float,
+    angle_step: float,
+    *,
+    use_circular_roi: bool,
+    use_fft_fan_filter: bool,
+    fft_half_width_deg: float,
+    fft_rmin_ratio: float,
+    fft_rmax_ratio: float,
+    verbose: bool,
+    vote_theta_res_deg: float,
+    vote_k_ratio: float,
+    vote_exclude_normals: Optional[List[float]],
+    vote_exclude_tol_deg: float,
+    vote_theta_range: Tuple[float, float],
+    save_candidate_overlays: bool,
+) -> Dict[str, Any]:
+    probe_rows: List[Dict[str, Any]] = []
     t_total0 = time.perf_counter()
     angle_times: List[Dict[str, float]] = []
     if vote_exclude_normals is None:
         vote_exclude_normals = [45.0, 135.0]
 
     best: Dict[str, Any] = {
-        "angle": None, "slope": None, "score": -1.0,
-        "theta_fft": None, "sti_raw": None, "fps": fps, "angle_probe": None
+        "angle": None,
+        "slope": None,
+        "score": -1.0,
+        "theta_fft": None,
+        "sti_raw": None,
+        "fps": fps,
+        "angle_probe": None,
     }
 
     n_lines = 0
@@ -297,113 +310,247 @@ def adaptive_direction_search(video_path: str,
     return best
 
 
-# def calculate_extended_line(center: Tuple[int, int], bank_point: Tuple[int, int], interval_px: int) -> List[
-#     Tuple[int, int]]:
-#     # 计算两点之间的向量
-#     cx, cy = center
-#     bx, by = bank_point
-#     vector_x = bx - cx
-#     vector_y = by - cy
-#     length = int(np.sqrt(vector_x ** 2 + vector_y ** 2))  # 计算两点间的距离
-#     num_points = length // interval_px  # 计算测点数目
-#     extended_points = []
-#
-#     for i in range(-num_points, num_points + 1):
-#         # 计算每个测点坐标
-#         new_x = int(cx + i * vector_x / num_points)
-#         new_y = int(cy + i * vector_y / num_points)
-#         extended_points.append((new_x, new_y))
-#
-#     return extended_points
-#
-#
-# # 批量测速：沿线段计算多点测速结果
-# def batch_probe_along_line(video_path: str,
-#                            center: Tuple[int, int],
-#                            bank_point: Tuple[int, int],
-#                            interval_px: int,
-#                            length_px: int,
-#                            angle_range: Tuple[float, float, float],
-#                            max_frames: int,
-#                            m_per_px: float,
-#                            fps: float,
-#                            use_circular_roi: bool,
-#                            use_fft_fan_filter: bool,
-#                            fft_half_width_deg: float,
-#                            fft_rmin_ratio: float,
-#                            fft_rmax_ratio: float,
-#                            vote_theta_res_deg: float,
-#                            vote_k_ratio: float,
-#                            vote_exclude_normals: List[float],
-#                            vote_exclude_tol_deg: float,
-#                            vote_theta_range: Tuple[float, float]) -> None:
-#     # 初始化视频读取
-#     cap = cv2.VideoCapture(video_path)
-#     if not cap.isOpened():
-#         raise RuntimeError(f'无法打开视频文件: {video_path}')
-#     fps = float(cap.get(cv2.CAP_PROP_FPS))
-#
-#     # 获取所有视频帧
-#     frames = []
-#     count = 0
-#     while True:
-#         ok, frame = cap.read()
-#         if not ok or (max_frames > 0 and count >= max_frames):
-#             break
-#         frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
-#         count += 1
-#     cap.release()
-#
-#     # 计算所有延伸点
-#     extended_points = calculate_extended_line(center, bank_point, interval_px)
-#
-#     # 存储每个点的测速结果
-#     results = []
-#
-#     # 对每个测点执行相同的测速流程
-#     for point in extended_points:
-#         sti = build_sti_from_frames(frames, point, length_px, angle_range[0])  # 初步计算 STI
-#         if sti is None:
-#             continue
-#
-#         # 可选 FFT 扇形增强
-#         if use_fft_fan_filter:
-#             sti, _ = enhance_sti_via_fft_fan(sti, fft_half_width_deg, fft_rmin_ratio, fft_rmax_ratio)
-#
-#         # Canny 边缘提取
-#         edges = compute_canny_edges(sti, use_circular_roi)
-#
-#         # 角度投票霍夫
-#         total_lines, angle_votes, votes_full, theta_axis, rho_max, best_info = hough_angle_voting_min(
-#             edges, theta_res_deg=vote_theta_res_deg, rho_step=1.0, k_ratio=vote_k_ratio)
-#
-#         # 过滤掉不符合条件的角度
-#         votes_filtered = _apply_theta_filters_on_votes(votes_full, theta_axis, vote_exclude_normals,
-#                                                        vote_exclude_tol_deg, vote_theta_range)
-#
-#         # 获取最佳结果
-#         if np.sum(votes_filtered) > 0:
-#             peak_idx = np.argmax(votes_filtered)
-#             theta_normal_deg = theta_axis[peak_idx]
-#             peak_votes = votes_filtered[peak_idx]
-#             alpha_deg = (theta_normal_deg + 90) % 180  # 计算主纹理角
-#             results.append({
-#                 'point': point,
-#                 'theta_normal_deg': theta_normal_deg,
-#                 'alpha_deg': alpha_deg,
-#                 'speed_m_per_s': peak_votes * m_per_px * fps,
-#                 'hough_score': peak_votes
-#             })
-#         else:
-#             results.append({
-#                 'point': point,
-#                 'theta_normal_deg': None,
-#                 'alpha_deg': None,
-#                 'speed_m_per_s': None,
-#                 'hough_score': None
-#             })
-#
-#     # 保存结果为 Excel
-#     df = pd.DataFrame(results)
-#     df.to_excel('batch_probe_results.xlsx', index=False)
-#     print(f"[result] 批量测速结果已保存到 'batch_probe_results.xlsx'")
+def adaptive_direction_search(video_path: str,
+                              center: Tuple[int, int],
+                              length_px: int,
+                              angle_start: float, angle_end: float, angle_step: float,
+                              max_frames: int = 300,
+                              use_circular_roi: bool = False,
+                              use_fft_fan_filter: bool = True,
+                              fft_half_width_deg: float = 4.0,
+                              fft_rmin_ratio: float = 0.05,
+                              fft_rmax_ratio: float = 1.0,
+                              verbose: bool = False,
+                              vote_theta_res_deg: float = 0.5,
+                              vote_k_ratio: float = 0.55,
+                              vote_exclude_normals: Optional[List[float]] = None,
+                              vote_exclude_tol_deg: float = 0.6,
+                              vote_theta_range: Tuple[float, float] = (0.0, 180.0),
+                              save_candidate_overlays: bool = False
+                              ) -> Dict[str, Any]:
+    frames, fps = _load_video_frames(video_path, max_frames)
+
+    return _adaptive_direction_search_on_frames(
+        frames,
+        fps,
+        center,
+        length_px,
+        angle_start,
+        angle_end,
+        angle_step,
+        use_circular_roi=use_circular_roi,
+        use_fft_fan_filter=use_fft_fan_filter,
+        fft_half_width_deg=fft_half_width_deg,
+        fft_rmin_ratio=fft_rmin_ratio,
+        fft_rmax_ratio=fft_rmax_ratio,
+        verbose=verbose,
+        vote_theta_res_deg=vote_theta_res_deg,
+        vote_k_ratio=vote_k_ratio,
+        vote_exclude_normals=vote_exclude_normals,
+        vote_exclude_tol_deg=vote_exclude_tol_deg,
+        vote_theta_range=vote_theta_range,
+        save_candidate_overlays=save_candidate_overlays,
+    )
+
+
+def _calculate_extended_line(center: Tuple[int, int],
+                              bank_point: Tuple[int, int],
+                              interval_px: int,
+                              frame_shape: Tuple[int, int]) -> List[Tuple[int, int]]:
+    """沿着 CENTER-岸边线生成多点测速坐标，直到触碰画面边界。"""
+    if interval_px <= 0:
+        raise ValueError("interval_px 必须为正数")
+
+    h, w = frame_shape
+    cx, cy = center
+    bx, by = bank_point
+    dx = bx - cx
+    dy = by - cy
+    length = math.hypot(dx, dy)
+    if length == 0:
+        return [center]
+
+    ux = dx / length
+    uy = dy / length
+    max_radius = math.hypot(w, h)
+
+    points: List[Tuple[int, int]] = [center]
+    for direction in (1, -1):
+        dist = interval_px
+        while dist <= max_radius:
+            px = cx + direction * ux * dist
+            py = cy + direction * uy * dist
+            if px < 0 or px >= w or py < 0 or py >= h:
+                break
+            pt = (int(round(px)), int(round(py)))
+            if pt not in points:
+                points.append(pt)
+            dist += interval_px
+    return points
+
+
+def _compute_dynamic_length(base_length: int,
+                             speed_m_per_s: Optional[float],
+                             *,
+                             enable: bool,
+                             ref_speed: Optional[float],
+                             min_length_px: Optional[int],
+                             max_length_px: Optional[int]) -> int:
+    """根据速度调整测线长度。"""
+    if not enable or speed_m_per_s is None or speed_m_per_s <= 0:
+        return base_length
+    if ref_speed is None or ref_speed <= 0:
+        ref_speed = 1.0
+    scaled = int(round(base_length * (speed_m_per_s / ref_speed)))
+    if min_length_px is not None:
+        scaled = max(min_length_px, scaled)
+    if max_length_px is not None and max_length_px > 0:
+        scaled = min(max_length_px, scaled)
+    return max(2, scaled)
+
+
+def batch_probe_along_line(
+    video_path: str,
+    center: Tuple[int, int],
+    bank_point: Tuple[int, int],
+    interval_px: int,
+    length_px: int,
+    angle_range: Tuple[float, float, float],
+    max_frames: int,
+    m_per_px: Optional[float],
+    fps: Optional[float],
+    use_circular_roi: bool,
+    use_fft_fan_filter: bool,
+    fft_half_width_deg: float,
+    fft_rmin_ratio: float,
+    fft_rmax_ratio: float,
+    vote_theta_res_deg: float,
+    vote_k_ratio: float,
+    vote_exclude_normals: Optional[List[float]],
+    vote_exclude_tol_deg: float,
+    vote_theta_range: Tuple[float, float],
+    *,
+    use_dynamic_length: bool,
+    length_speed_reference: Optional[float],
+    min_length_px: Optional[int],
+    max_length_px: Optional[int],
+    verbose: bool,
+) -> List[Dict[str, Any]]:
+    """沿着给定直线执行多点测速，并按速度缩放测线长度。"""
+
+    frames, video_fps = _load_video_frames(video_path, max_frames)
+    effective_fps = fps if fps is not None else video_fps
+    angle_start, angle_end, angle_step = angle_range
+
+    frame_shape = frames[0].shape[:2]
+    probe_points = _calculate_extended_line(center, bank_point, interval_px, frame_shape)
+
+    results: List[Dict[str, Any]] = []
+    excel_path = "batch_probe_results.xlsx"
+    try:
+        from .core import DEBUG_RUN_DIR
+        if DEBUG_RUN_DIR:
+            excel_path = os.path.join(DEBUG_RUN_DIR, excel_path)
+    except Exception:
+        pass
+
+    for idx, point in enumerate(probe_points):
+        best = _adaptive_direction_search_on_frames(
+            frames,
+            video_fps,
+            point,
+            length_px,
+            angle_start,
+            angle_end,
+            angle_step,
+            use_circular_roi=use_circular_roi,
+            use_fft_fan_filter=use_fft_fan_filter,
+            fft_half_width_deg=fft_half_width_deg,
+            fft_rmin_ratio=fft_rmin_ratio,
+            fft_rmax_ratio=fft_rmax_ratio,
+            verbose=verbose,
+            vote_theta_res_deg=vote_theta_res_deg,
+            vote_k_ratio=vote_k_ratio,
+            vote_exclude_normals=vote_exclude_normals,
+            vote_exclude_tol_deg=vote_exclude_tol_deg,
+            vote_theta_range=vote_theta_range,
+            save_candidate_overlays=False,
+        )
+
+        if fps is not None:
+            best["fps"] = float(fps)
+        elif effective_fps:
+            best["fps"] = float(effective_fps)
+
+        slope = best.get("slope")
+        best_fps = best.get("fps")
+        speed_m_per_s = None
+        if slope is not None and m_per_px is not None and best_fps:
+            speed_m_per_s = abs(slope) * m_per_px * float(best_fps)
+
+        dynamic_length = _compute_dynamic_length(
+            length_px,
+            speed_m_per_s,
+            enable=use_dynamic_length,
+            ref_speed=length_speed_reference,
+            min_length_px=min_length_px,
+            max_length_px=max_length_px,
+        )
+
+        if dynamic_length != length_px:
+            best = _adaptive_direction_search_on_frames(
+                frames,
+                video_fps,
+                point,
+                dynamic_length,
+                angle_start,
+                angle_end,
+                angle_step,
+                use_circular_roi=use_circular_roi,
+                use_fft_fan_filter=use_fft_fan_filter,
+                fft_half_width_deg=fft_half_width_deg,
+                fft_rmin_ratio=fft_rmin_ratio,
+                fft_rmax_ratio=fft_rmax_ratio,
+                verbose=verbose,
+                vote_theta_res_deg=vote_theta_res_deg,
+                vote_k_ratio=vote_k_ratio,
+                vote_exclude_normals=vote_exclude_normals,
+                vote_exclude_tol_deg=vote_exclude_tol_deg,
+                vote_theta_range=vote_theta_range,
+                save_candidate_overlays=False,
+            )
+            if fps is not None:
+                best["fps"] = float(fps)
+            elif effective_fps:
+                best["fps"] = float(effective_fps)
+            slope = best.get("slope")
+            if slope is not None and m_per_px is not None and best.get("fps"):
+                speed_m_per_s = abs(slope) * m_per_px * float(best["fps"])
+
+        result_row = {
+            "index": idx,
+            "point_x": point[0],
+            "point_y": point[1],
+            "angle_probe_deg": best.get("angle_probe"),
+            "alpha_deg": best.get("angle"),
+            "slope_px_per_frame": best.get("slope"),
+            "speed_m_per_s": speed_m_per_s,
+            "length_px": dynamic_length,
+            "score": best.get("score"),
+        }
+        results.append(result_row)
+
+        if verbose:
+            speed_txt = "N/A" if speed_m_per_s is None else f"{speed_m_per_s:.4f}"
+            print(f"[batch] point#{idx:02d} {point} | length={dynamic_length}px | speed={speed_txt} m/s")
+
+    try:
+        df = pd.DataFrame(results)
+        df.to_excel(excel_path, index=False)
+        if verbose:
+            print(f"[batch] 多点测速结果已保存: {excel_path}")
+    except Exception as exc:
+        if verbose:
+            print(f"[batch] 保存 Excel 失败: {exc}")
+
+    return results

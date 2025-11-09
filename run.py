@@ -15,6 +15,10 @@ BANK_POINT: Tuple[int, int] = (623, 1040) # 岸边点（与 CENTER 组成测速�
 PROBE_INTERVAL_PX = 100 # 两测点之间的像素间隔（从中心点向两端延伸）
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 200
+USE_DYNAMIC_LINE_LENGTH = True  # ← 让测线长度随速度缩放
+DYNAMIC_LENGTH_REFERENCE_SPEED = 1.0  # 速度=1.0 m/s 时使用 LENGTH_PX
+DYNAMIC_LENGTH_MIN_PX = max(16, LENGTH_PX // 2)
+DYNAMIC_LENGTH_MAX_PX = LENGTH_PX * 3
 ANGLE_START, ANGLE_END, ANGLE_STEP = -120, -70, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 200
 USE_ROI = True
@@ -161,32 +165,45 @@ def main():
     else:
         print("[scale] 未提供比例尺；将仅输出像素单位的斜率，不计算 m/s")
 
-    # #多点测速
-    #     # 新增路径：多点测速
-    # if USE_BATCH_LINE_PROBING:
-    #     from stiv_adapt.search import batch_probe_along_line
-    #     batch_probe_along_line(
-    #         video_path=VIDEO,
-    #         center=CENTER,
-    #         bank_point=BANK_POINT,
-    #         interval_px=PROBE_INTERVAL_PX,
-    #         length_px=LENGTH_PX,
-    #         angle_range=(ANGLE_START, ANGLE_END, ANGLE_STEP),
-    #         max_frames=MAX_FRAMES,
-    #         m_per_px=m_per_px,
-    #         fps=FPS,
-    #         use_circular_roi=USE_ROI,
-    #         use_fft_fan_filter=USE_FFT_FAN,
-    #         fft_half_width_deg=FFT_HALF_DEG,
-    #         fft_rmin_ratio=FFT_RMIN_RATIO,
-    #         fft_rmax_ratio=FFT_RMAX_RATIO,
-    #         vote_theta_res_deg=VOTE_THETA_RES_DEG,
-    #         vote_k_ratio=VOTE_K_RATIO,
-    #         vote_exclude_normals=VOTE_EXCLUDE_NORMALS,
-    #         vote_exclude_tol_deg=VOTE_EXCLUDE_TOL_DEG,
-    #         vote_theta_range=VOTE_THETA_RANGE
-    #     )
-    #     return
+    if USE_BATCH_LINE_PROBING:
+        from stiv_adapt.search import batch_probe_along_line
+
+        results = batch_probe_along_line(
+            video_path=VIDEO,
+            center=CENTER,
+            bank_point=BANK_POINT,
+            interval_px=PROBE_INTERVAL_PX,
+            length_px=LENGTH_PX,
+            angle_range=(ANGLE_START, ANGLE_END, ANGLE_STEP),
+            max_frames=MAX_FRAMES,
+            m_per_px=m_per_px,
+            fps=FPS,
+            use_circular_roi=USE_ROI,
+            use_fft_fan_filter=USE_FFT_FAN,
+            fft_half_width_deg=FFT_HALF_DEG,
+            fft_rmin_ratio=FFT_RMIN_RATIO,
+            fft_rmax_ratio=FFT_RMAX_RATIO,
+            vote_theta_res_deg=VOTE_THETA_RES_DEG,
+            vote_k_ratio=VOTE_K_RATIO,
+            vote_exclude_normals=VOTE_EXCLUDE_NORMALS,
+            vote_exclude_tol_deg=VOTE_EXCLUDE_TOL_DEG,
+            vote_theta_range=VOTE_THETA_RANGE,
+            use_dynamic_length=USE_DYNAMIC_LINE_LENGTH,
+            length_speed_reference=DYNAMIC_LENGTH_REFERENCE_SPEED,
+            min_length_px=DYNAMIC_LENGTH_MIN_PX,
+            max_length_px=DYNAMIC_LENGTH_MAX_PX,
+            verbose=VERBOSE,
+        )
+
+        print("\n====== 多点测速结果 ======")
+        for row in results:
+            speed_txt = "N/A" if row["speed_m_per_s"] is None else f"{row['speed_m_per_s']:.4f} m/s"
+            print(
+                f"#{row['index']:02d} pt=({row['point_x']},{row['point_y']}) "
+                f"len={row['length_px']}px angle={row['angle_probe_deg']}° "
+                f"slope={row['slope_px_per_frame']} px/frame speed={speed_txt} score={row['score']}"
+            )
+        return
 
 
     # 自适应方向搜索（内部：构建STI → 可选FFT扇形增强 → Canny → 角度投票霍夫）
