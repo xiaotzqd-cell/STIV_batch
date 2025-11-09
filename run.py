@@ -3,22 +3,27 @@ import os
 import math
 import cv2
 from typing import Optional, Tuple
-from stiv_adapt.search import adaptive_direction_search, batch_probe_along_centerline
+from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 # ========== 用户配置区（按需修改） ==========
 VIDEO = r"D:\Programs\Python\stiv\stiv_adapt/CRR.MP4"
-CENTER: Tuple[int, int] =(1853, 1387)#(1870, 1117)  # ← 手动中心点（像素坐标）
+CENTER: Tuple[int, int] =(1870, 1117)  # ← 手动中心点（像素坐标）
 
 #多点测速参数
-USE_BATCH_LINE_PROBING: bool = False# True 启用；False 完全维持原来的单点流程
-BANK_POINT: Tuple[int, int] =(443, 1317) #(623, 1040) # 岸边点（与 CENTER 组成测速直线）
-PROBE_INTERVAL_PX: int = 200 # 两测点之间的像素间隔（从中心点向两端延伸）
+USE_BATCH_LINE_PROBING = True # ← 开启多点测速
+BANK_POINT: Tuple[int, int] = (623, 1040) # 岸边点（与 CENTER 组成测速直线）
+PROBE_INTERVAL_PX = 100 # 两测点之间的像素间隔（从中心点向两端延伸）
 # STI 测线参数（角度搜索范围：线方向）
-LENGTH_PX = 256
-ANGLE_START, ANGLE_END, ANGLE_STEP = -100, -80, 1   # 遍历的“测速线角度”
-MAX_FRAMES = 256
+LENGTH_PX = 200
+USE_DYNAMIC_LINE_LENGTH = True  # ← 让测线长度随速度缩放
+DYNAMIC_LENGTH_REFERENCE_SPEED = 1.0  # 速度=1.0 m/s 时使用 LENGTH_PX
+DYNAMIC_LENGTH_MIN_PX = max(16, LENGTH_PX // 2)
+DYNAMIC_LENGTH_MAX_PX = LENGTH_PX * 3
+ANGLE_START, ANGLE_END, ANGLE_STEP = -120, -70, 1   # 遍历的“测速线角度”
+MAX_FRAMES = 200
 USE_ROI = True
 VERBOSE = True
+
 # 频域扇形增强（用于评分）
 USE_FFT_FAN = True
 FFT_HALF_DEG = 4
@@ -31,8 +36,10 @@ SCALE_M_PER_PIXEL: Optional[float] = None  # A) 直接给（m/px）；不想手�
 CALIB_REAL_M: Optional[float] = 49.38      # B) 首帧两点标定（米）
 CALIB_LINE_XYXY: Optional[Tuple[int, int, int, int]] = (445, 1321, 3080, 1439)
 #投票霍夫的可调参数（法线角 θ 的设置）——
-VOTE_THETA_RES_DEG = 1                # 角度分辨率（度）
-VOTE_K_RATIO: float = 0.5                # 用比例阈值 K=0.55*R
+VOTE_THETA_RES_DEG = 1                 # 角度分辨率（度）
+VOTE_K_RATIO: float = 0.52               # 用比例阈值 K=0.55*R
+VOTE_EXCLUDE_NORMALS = [45.0, 135.0]     # 排除异常峰的法线角（度）
+VOTE_EXCLUDE_TOL_DEG = 0                 # 容差（度），建议≈分辨率的一半
 VOTE_THETA_RANGE = (0.0, 180.0)          # 有效法线角范围 [min, max)
 # ==========================================
 def compute_scale_from_first_frame(video_path: str,
@@ -158,23 +165,19 @@ def main():
     else:
         print("[scale] 未提供比例尺；将仅输出像素单位的斜率，不计算 m/s")
 
-    # #多点测速
     if USE_BATCH_LINE_PROBING:
-        from stiv_adapt.search import batch_probe_along_centerline
+        from stiv_adapt.search import batch_probe_along_line
 
-        print("[batch] 启动沿中心点的多点测速 ...")
-        batch_res = batch_probe_along_centerline(
+        results = batch_probe_along_line(
             video_path=VIDEO,
             center=CENTER,
             bank_point=BANK_POINT,
             interval_px=PROBE_INTERVAL_PX,
             length_px=LENGTH_PX,
-            angle_start=ANGLE_START,
-            angle_end=ANGLE_END,
-            angle_step=ANGLE_STEP,
+            angle_range=(ANGLE_START, ANGLE_END, ANGLE_STEP),
             max_frames=MAX_FRAMES,
-            m_per_px=m_per_px,  # 比例尺（米/像素），若为 None 则仅导出像素单位斜率
-            fps=FPS,  # 帧率
+            m_per_px=m_per_px,
+            fps=FPS,
             use_circular_roi=USE_ROI,
             use_fft_fan_filter=USE_FFT_FAN,
             fft_half_width_deg=FFT_HALF_DEG,
@@ -182,12 +185,24 @@ def main():
             fft_rmax_ratio=FFT_RMAX_RATIO,
             vote_theta_res_deg=VOTE_THETA_RES_DEG,
             vote_k_ratio=VOTE_K_RATIO,
+            vote_exclude_normals=VOTE_EXCLUDE_NORMALS,
+            vote_exclude_tol_deg=VOTE_EXCLUDE_TOL_DEG,
             vote_theta_range=VOTE_THETA_RANGE,
+            use_dynamic_length=USE_DYNAMIC_LINE_LENGTH,
+            length_speed_reference=DYNAMIC_LENGTH_REFERENCE_SPEED,
+            min_length_px=DYNAMIC_LENGTH_MIN_PX,
+            max_length_px=DYNAMIC_LENGTH_MAX_PX,
+            verbose=VERBOSE,
         )
 
-        # 批量模式下：不打印单点结果；把输出路径告诉你即可
-        print(f"[batch] 结果 Excel/CSV 已生成：{os.path.abspath(batch_res['excel_path'])}")
-        print(f"[batch] 首帧叠加图已生成：{os.path.abspath(batch_res['overlay_path'])}")
+        print("\n====== 多点测速结果 ======")
+        for row in results:
+            speed_txt = "N/A" if row["speed_m_per_s"] is None else f"{row['speed_m_per_s']:.4f} m/s"
+            print(
+                f"#{row['index']:02d} pt=({row['point_x']},{row['point_y']}) "
+                f"len={row['length_px']}px angle={row['angle_probe_deg']}° "
+                f"slope={row['slope_px_per_frame']} px/frame speed={speed_txt} score={row['score']}"
+            )
         return
 
 
@@ -209,6 +224,8 @@ def main():
         # —— 将 run 的可调参数传入 search —— #
         vote_theta_res_deg=VOTE_THETA_RES_DEG,
         vote_k_ratio=VOTE_K_RATIO,
+        vote_exclude_normals=VOTE_EXCLUDE_NORMALS,
+        vote_exclude_tol_deg=VOTE_EXCLUDE_TOL_DEG,
         vote_theta_range=VOTE_THETA_RANGE,
         #vote_rho_step=VOTE_RHO_STEP,
     )
