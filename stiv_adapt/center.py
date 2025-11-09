@@ -1,8 +1,8 @@
 import cv2
 import os
 
-video_path = r"D:\Programs\Python\stiv\stiv_adapt\CRR.MP4"
-pic_path =r"D:\Programs\Python\stiv\stiv_adapt\CRR_calibration_image.jpg"
+video_path = r"D:\Programs\Python\stiv1\CRR.MP4"
+pic_path =r"D:\Programs\Python\stiv1\CRR_calibration_image.jpg"
 cap = cv2.VideoCapture(video_path)
 img = cv2.imread(pic_path,cv2.IMREAD_COLOR)
 

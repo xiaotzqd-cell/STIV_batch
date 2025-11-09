@@ -10,7 +10,7 @@ import math
 import json
 import time
 # ====== 配置区 ======
-IMAGE_PATH = r"D:\Programs\Python\stiv\stiv_adapt\CRR_calibration_image.jpg"
+IMAGE_PATH = r"D:\Programs\Python\stiv1\CRR_calibration_image.jpg"
 REAL_DISTANCE_M = 49.38    # 两岸真实距离 (米)
 OUT_DIR = os.path.join(os.path.dirname(__file__), "out_calib")
 MAX_WIN_W, MAX_WIN_H = 1600, 1000   # 窗口最大尺寸，过大会等比例缩放显示
