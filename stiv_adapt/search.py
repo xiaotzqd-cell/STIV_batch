@@ -12,9 +12,10 @@ from .core import (
     build_sti_from_frames,
     enhance_sti_via_fft_fan,
     compute_canny_edges,
+    push_debug_dir,
+    DEBUG_RUN_DIR,
 )
 from .vote_accumulator import hough_angle_voting_min
-from stiv_adapt.core import build_sti_from_frames, enhance_sti_via_fft_fan, compute_canny_edges, hough_angle_voting_min
 
 vote_rho_step = 1
 

@@ -2,7 +2,7 @@
 import os
 import math
 import cv2
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict
 from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 # ========== 用户配置区（按需修改） ==========
@@ -146,6 +146,87 @@ def save_flow_overlay(
         cv2.imwrite(prev_path, prev)
         print(f"[overlay] {os.path.abspath(prev_path)} (preview)")
 
+
+def save_batch_overlays(
+    video_path: str,
+    outdir: str,
+    center: Tuple[int, int],
+    bank_point: Tuple[int, int],
+    batch_results: List[Dict[str, object]],
+    *,
+    m_per_px: Optional[float],
+    default_fps: Optional[float],
+) -> None:
+    """在首帧上绘制所有多点测速结果，并生成单点叠加图。"""
+
+    if not batch_results:
+        return
+
+    cap = cv2.VideoCapture(video_path)
+    ok, frame0 = cap.read()
+    cap.release()
+    if not ok:
+        print("[batch overlay] 无法读取首帧，跳过叠加图保存")
+        return
+
+    overview = frame0.copy()
+    cv2.line(overview, center, bank_point, (255, 255, 0), 2, cv2.LINE_AA)
+    cv2.circle(overview, center, 6, (0, 0, 255), -1, cv2.LINE_AA)
+    cv2.circle(overview, bank_point, 6, (0, 0, 255), -1, cv2.LINE_AA)
+
+    colors = [
+        (0, 255, 255),
+        (0, 165, 255),
+        (0, 255, 0),
+        (255, 0, 255),
+        (255, 0, 0),
+        (255, 255, 0),
+    ]
+
+    overlay_dir = os.path.join(outdir, "batch_overlays")
+    os.makedirs(overlay_dir, exist_ok=True)
+
+    for row in batch_results:
+        angle = row.get("angle_probe_deg")
+        if angle is None:
+            continue
+        idx = int(row.get("index", 0))
+        point = (int(row.get("point_x", 0)), int(row.get("point_y", 0)))
+        length = int(row.get("length_px", LENGTH_PX))
+        slope = row.get("slope_px_per_frame")
+        fps_here = row.get("fps") or default_fps
+        color = colors[idx % len(colors)]
+
+        (x1, y1, x2, y2), _ = _line_endpoints(point, length, angle)
+        cv2.line(overview, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
+        cv2.circle(overview, point, 4, color, -1, cv2.LINE_AA)
+
+        text = f"#{idx:02d}"
+        speed_val = row.get("speed_m_per_s")
+        if speed_val is not None:
+            text += f" {speed_val:.2f} m/s"
+        cv2.putText(overview, text, (point[0] + 10, point[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        filename = f"batch_point_{idx:02d}_overlay.png"
+        save_flow_overlay(
+            video_path=video_path,
+            outdir=overlay_dir,
+            center=point,
+            best_angle_deg=angle,
+            length_px=length,
+            slope_px_per_frame=slope,
+            m_per_px=m_per_px,
+            fps=fps_here,
+            calib_xyxy=None,
+            calib_real_m=None,
+            filename=filename,
+            preview_max_side=1280,
+        )
+
+    overview_path = os.path.join(overlay_dir, "batch_overview.png")
+    cv2.imwrite(overview_path, overview)
+    print(f"[batch overlay] {os.path.abspath(overview_path)}")
 
 def main():
     if not os.path.isfile(VIDEO):
