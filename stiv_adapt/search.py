@@ -390,26 +390,6 @@ def _calculate_extended_line(center: Tuple[int, int],
     return points
 
 
-def _compute_dynamic_length(base_length: int,
-                             speed_m_per_s: Optional[float],
-                             *,
-                             enable: bool,
-                             ref_speed: Optional[float],
-                             min_length_px: Optional[int],
-                             max_length_px: Optional[int]) -> int:
-    """根据速度调整测线长度。"""
-    if not enable or speed_m_per_s is None or speed_m_per_s <= 0:
-        return base_length
-    if ref_speed is None or ref_speed <= 0:
-        ref_speed = 1.0
-    scaled = int(round(base_length * (speed_m_per_s / ref_speed)))
-    if min_length_px is not None:
-        scaled = max(min_length_px, scaled)
-    if max_length_px is not None and max_length_px > 0:
-        scaled = min(max_length_px, scaled)
-    return max(2, scaled)
-
-
 def batch_probe_along_line(
     video_path: str,
     center: Tuple[int, int],
@@ -430,14 +410,9 @@ def batch_probe_along_line(
     vote_exclude_normals: Optional[List[float]],
     vote_exclude_tol_deg: float,
     vote_theta_range: Tuple[float, float],
-    *,
-    use_dynamic_length: bool,
-    length_speed_reference: Optional[float],
-    min_length_px: Optional[int],
-    max_length_px: Optional[int],
     verbose: bool,
 ) -> List[Dict[str, Any]]:
-    """沿着给定直线执行多点测速，并按速度缩放测线长度。"""
+    """沿着给定直线执行多点测速。"""
 
     frames, video_fps = _load_video_frames(video_path, max_frames)
     effective_fps = fps if fps is not None else video_fps
@@ -489,45 +464,6 @@ def batch_probe_along_line(
         if slope is not None and m_per_px is not None and best_fps:
             speed_m_per_s = abs(slope) * m_per_px * float(best_fps)
 
-        dynamic_length = _compute_dynamic_length(
-            length_px,
-            speed_m_per_s,
-            enable=use_dynamic_length,
-            ref_speed=length_speed_reference,
-            min_length_px=min_length_px,
-            max_length_px=max_length_px,
-        )
-
-        if dynamic_length != length_px:
-            best = _adaptive_direction_search_on_frames(
-                frames,
-                video_fps,
-                point,
-                dynamic_length,
-                angle_start,
-                angle_end,
-                angle_step,
-                use_circular_roi=use_circular_roi,
-                use_fft_fan_filter=use_fft_fan_filter,
-                fft_half_width_deg=fft_half_width_deg,
-                fft_rmin_ratio=fft_rmin_ratio,
-                fft_rmax_ratio=fft_rmax_ratio,
-                verbose=verbose,
-                vote_theta_res_deg=vote_theta_res_deg,
-                vote_k_ratio=vote_k_ratio,
-                vote_exclude_normals=vote_exclude_normals,
-                vote_exclude_tol_deg=vote_exclude_tol_deg,
-                vote_theta_range=vote_theta_range,
-                save_candidate_overlays=False,
-            )
-            if fps is not None:
-                best["fps"] = float(fps)
-            elif effective_fps:
-                best["fps"] = float(effective_fps)
-            slope = best.get("slope")
-            if slope is not None and m_per_px is not None and best.get("fps"):
-                speed_m_per_s = abs(slope) * m_per_px * float(best["fps"])
-
         result_row = {
             "index": idx,
             "point_x": point[0],
@@ -536,14 +472,14 @@ def batch_probe_along_line(
             "alpha_deg": best.get("angle"),
             "slope_px_per_frame": best.get("slope"),
             "speed_m_per_s": speed_m_per_s,
-            "length_px": dynamic_length,
+            "length_px": length_px,
             "score": best.get("score"),
         }
         results.append(result_row)
 
         if verbose:
             speed_txt = "N/A" if speed_m_per_s is None else f"{speed_m_per_s:.4f}"
-            print(f"[batch] point#{idx:02d} {point} | length={dynamic_length}px | speed={speed_txt} m/s")
+            print(f"[batch] point#{idx:02d} {point} | length={length_px}px | speed={speed_txt} m/s")
 
     try:
         df = pd.DataFrame(results)
