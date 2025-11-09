@@ -15,10 +15,6 @@ BANK_POINT: Tuple[int, int] = (533, 1120) # 岸边点（与 CENTER 组成测速�
 PROBE_INTERVAL_PX = 300 # 两测点之间的像素间隔（从中心点向两端延伸）
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 200
-USE_DYNAMIC_LINE_LENGTH = True  # ← 让测线长度随速度缩放
-DYNAMIC_LENGTH_REFERENCE_SPEED = 1.0  # 速度=1.0 m/s 时使用 LENGTH_PX
-DYNAMIC_LENGTH_MIN_PX = max(16, LENGTH_PX // 2)
-DYNAMIC_LENGTH_MAX_PX = LENGTH_PX * 3
 ANGLE_START, ANGLE_END, ANGLE_STEP = -120, -70, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 200
 USE_ROI = True
@@ -174,6 +170,24 @@ def save_batch_overlays(
     cv2.circle(overview, center, 6, (0, 0, 255), -1, cv2.LINE_AA)
     cv2.circle(overview, bank_point, 6, (0, 0, 255), -1, cv2.LINE_AA)
 
+    # 预先统计速度绝对值用于归一化箭头长度
+    speed_values: List[float] = []
+    for row in batch_results:
+        spd = row.get("speed_m_per_s")
+        if spd is None:
+            slope = row.get("slope_px_per_frame")
+            fps_here = row.get("fps") or default_fps
+            if slope is not None and m_per_px is not None and fps_here:
+                spd = slope * m_per_px * fps_here
+        if spd is not None:
+            try:
+                row["_overlay_speed_mps"] = float(spd)
+            except (TypeError, ValueError):
+                continue
+            speed_values.append(abs(row["_overlay_speed_mps"]))
+
+    max_speed = max(speed_values) if speed_values else None
+
     colors = [
         (0, 255, 255),
         (0, 165, 255),
@@ -203,10 +217,32 @@ def save_batch_overlays(
 
         text = f"#{idx:02d}"
         speed_val = row.get("speed_m_per_s")
-        if speed_val is not None:
+        overlay_speed = row.get("_overlay_speed_mps")
+        if overlay_speed is not None:
+            text += f" {overlay_speed:.2f} m/s"
+        elif speed_val is not None:
             text += f" {speed_val:.2f} m/s"
         cv2.putText(overview, text, (point[0] + 10, point[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        # 箭头长度与速度大小成正比
+        min_arrow_len = max(20, int(round(length * 0.2)))
+        max_arrow_len = max(min_arrow_len + 1, int(round(length * 0.7)))
+        arrow_len = min_arrow_len
+        if overlay_speed is not None and max_speed and max_speed > 0:
+            scale = abs(overlay_speed) / max_speed
+            arrow_len = int(round(min_arrow_len + scale * (max_arrow_len - min_arrow_len)))
+
+        if overlay_speed is not None:
+            sign = 1 if overlay_speed >= 0 else -1
+        else:
+            sign = 1 if (slope is None or slope >= 0) else -1
+
+        _, direction = _line_endpoints(point, 2, angle)  # 仅获取单位方向
+        dx, dy = direction
+        start = (int(point[0]), int(point[1]))
+        end = (int(point[0] + sign * dx * arrow_len), int(point[1] + sign * dy * arrow_len))
+        cv2.arrowedLine(overview, start, end, color, 3, tipLength=0.2)
 
         filename = f"batch_point_{idx:02d}_overlay.png"
         save_flow_overlay(
@@ -269,10 +305,6 @@ def main():
             vote_exclude_normals=VOTE_EXCLUDE_NORMALS,
             vote_exclude_tol_deg=VOTE_EXCLUDE_TOL_DEG,
             vote_theta_range=VOTE_THETA_RANGE,
-            use_dynamic_length=USE_DYNAMIC_LINE_LENGTH,
-            length_speed_reference=DYNAMIC_LENGTH_REFERENCE_SPEED,
-            min_length_px=DYNAMIC_LENGTH_MIN_PX,
-            max_length_px=DYNAMIC_LENGTH_MAX_PX,
             verbose=VERBOSE,
         )
 
@@ -284,6 +316,16 @@ def main():
                 f"len={row['length_px']}px angle={row['angle_probe_deg']}° "
                 f"slope={row['slope_px_per_frame']} px/frame speed={speed_txt} score={row['score']}"
             )
+
+        save_batch_overlays(
+            video_path=VIDEO,
+            outdir=outdir,
+            center=CENTER,
+            bank_point=BANK_POINT,
+            batch_results=results,
+            m_per_px=m_per_px,
+            default_fps=FPS,
+        )
         return
 
 
