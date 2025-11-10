@@ -33,10 +33,8 @@ CALIB_REAL_M: Optional[float] = 49.38      # B) 首帧两点标定（米）
 CALIB_LINE_XYXY: Optional[Tuple[int, int, int, int]] = (445, 1321, 3080, 1439)
 #投票霍夫的可调参数（法线角 θ 的设置）——
 VOTE_THETA_RES_DEG = 1                 # 角度分辨率（度）
-VOTE_K_RATIO: float = 0.52               # 用比例阈值 K=0.55*R
-VOTE_EXCLUDE_NORMALS = [45.0, 135.0]     # 排除异常峰的法线角（度）
-VOTE_EXCLUDE_TOL_DEG = 0                 # 容差（度），建议≈分辨率的一半
-VOTE_THETA_RANGE = (0.0, 180.0)          # 有效法线角范围 [min, max)
+VOTE_K_RATIO: float = 0.52             # 用比例阈值 K=0.55*R
+VOTE_THETA_RANGE = (0.0, 180.0)        # 有效法线角范围 [min, max)
 # ==========================================
 def compute_scale_from_first_frame(video_path: str,
                                    xyxy: Tuple[int, int, int, int],
@@ -324,8 +322,6 @@ def main():
             fft_rmax_ratio=FFT_RMAX_RATIO,
             vote_theta_res_deg=VOTE_THETA_RES_DEG,
             vote_k_ratio=VOTE_K_RATIO,
-            vote_exclude_normals=VOTE_EXCLUDE_NORMALS,
-            vote_exclude_tol_deg=VOTE_EXCLUDE_TOL_DEG,
             vote_theta_range=VOTE_THETA_RANGE,
             verbose=VERBOSE,
         )
@@ -369,8 +365,6 @@ def main():
         # —— 将 run 的可调参数传入 search —— #
         vote_theta_res_deg=VOTE_THETA_RES_DEG,
         vote_k_ratio=VOTE_K_RATIO,
-        vote_exclude_normals=VOTE_EXCLUDE_NORMALS,
-        vote_exclude_tol_deg=VOTE_EXCLUDE_TOL_DEG,
         vote_theta_range=VOTE_THETA_RANGE,
         #vote_rho_step=VOTE_RHO_STEP,
     )
