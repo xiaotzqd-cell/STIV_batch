@@ -21,20 +21,12 @@ vote_rho_step = 1
 
 def _apply_theta_filters_on_votes(votes_full: np.ndarray,
                                   theta_axis: np.ndarray,
-                                  exclude_normals: List[float],
-                                  exclude_tol_deg: float,
                                   theta_range: Tuple[float, float]) -> np.ndarray:
-    """对 votes_full 施加角度屏蔽与范围裁剪。"""
+    """根据角度范围对 votes_full 进行裁剪。"""
     vf = votes_full.copy()
     th_min, th_max = theta_range
     valid = (theta_axis >= th_min) & (theta_axis < th_max)
     vf[~valid] = 0
-    if exclude_normals and exclude_tol_deg >= 0:
-        for ang in exclude_normals:
-            # 距离最近等效角（周期 180）
-            dist = np.abs(((theta_axis - ang + 90.0) % 180.0) - 90.0)
-            mask = dist <= exclude_tol_deg
-            vf[mask] = 0
     return vf
 
 
@@ -99,16 +91,12 @@ def _adaptive_direction_search_on_frames(
     verbose: bool,
     vote_theta_res_deg: float,
     vote_k_ratio: float,
-    vote_exclude_normals: Optional[List[float]],
-    vote_exclude_tol_deg: float,
     vote_theta_range: Tuple[float, float],
     save_candidate_overlays: bool,
 ) -> Dict[str, Any]:
     probe_rows: List[Dict[str, Any]] = []
     t_total0 = time.perf_counter()
     angle_times: List[Dict[str, float]] = []
-    if vote_exclude_normals is None:
-        vote_exclude_normals = [45.0, 135.0]
 
     best: Dict[str, Any] = {
         "angle": None,
@@ -153,8 +141,6 @@ def _adaptive_direction_search_on_frames(
         # 角度过滤
         votes_filtered = _apply_theta_filters_on_votes(
             votes_full, theta_axis,
-            exclude_normals=vote_exclude_normals,
-            exclude_tol_deg=vote_exclude_tol_deg,
             theta_range=vote_theta_range
         )
         if votes_filtered.sum() <= 0:
@@ -241,9 +227,8 @@ def _adaptive_direction_search_on_frames(
             edges_best, theta_res_deg=vote_theta_res_deg, rho_step=1.0, k_ratio=float(vote_k_ratio)
         )
         votes_filtered = _apply_theta_filters_on_votes(
-            votes_full, theta_axis,
-            exclude_normals=vote_exclude_normals,
-            exclude_tol_deg=vote_exclude_tol_deg,
+            votes_full,
+            theta_axis,
             theta_range=vote_theta_range
         )
 
@@ -324,8 +309,6 @@ def adaptive_direction_search(video_path: str,
                               verbose: bool = False,
                               vote_theta_res_deg: float = 0.5,
                               vote_k_ratio: float = 0.55,
-                              vote_exclude_normals: Optional[List[float]] = None,
-                              vote_exclude_tol_deg: float = 0.6,
                               vote_theta_range: Tuple[float, float] = (0.0, 180.0),
                               save_candidate_overlays: bool = False
                               ) -> Dict[str, Any]:
@@ -347,8 +330,6 @@ def adaptive_direction_search(video_path: str,
         verbose=verbose,
         vote_theta_res_deg=vote_theta_res_deg,
         vote_k_ratio=vote_k_ratio,
-        vote_exclude_normals=vote_exclude_normals,
-        vote_exclude_tol_deg=vote_exclude_tol_deg,
         vote_theta_range=vote_theta_range,
         save_candidate_overlays=save_candidate_overlays,
     )
@@ -416,8 +397,6 @@ def batch_probe_along_line(
     fft_rmax_ratio: float,
     vote_theta_res_deg: float,
     vote_k_ratio: float,
-    vote_exclude_normals: Optional[List[float]],
-    vote_exclude_tol_deg: float,
     vote_theta_range: Tuple[float, float],
     verbose: bool,
 ) -> List[Dict[str, Any]]:
@@ -456,8 +435,6 @@ def batch_probe_along_line(
             verbose=verbose,
             vote_theta_res_deg=vote_theta_res_deg,
             vote_k_ratio=vote_k_ratio,
-            vote_exclude_normals=vote_exclude_normals,
-            vote_exclude_tol_deg=vote_exclude_tol_deg,
             vote_theta_range=vote_theta_range,
             save_candidate_overlays=False,
         )
