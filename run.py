@@ -177,10 +177,20 @@ def save_batch_overlays(
     # 复制首帧作为绘图底图
     overview = frame0.copy()
 
-    # === 2. 绘制中心点、岸边点及基准连线 ===
-    cv2.line(overview, center, bank_point, (255, 255, 0), 2, cv2.LINE_AA)   # 青色连线
-    cv2.circle(overview, center, 6, (0, 0, 255), -1, cv2.LINE_AA)           # 中心点红圆
-    cv2.circle(overview, bank_point, 6, (0, 0, 255), -1, cv2.LINE_AA)       # 岸边点红圆
+    # === 2. 绘制中心点、岸边点及对岸对称点的基准连线 ===
+    frame_h, frame_w = overview.shape[:2]
+    cx, cy = center
+    bx, by = bank_point
+    # 计算岸边点关于中心点的对称点，形成完整的横跨两岸的基准线
+    another_bank_point = (int(round(2 * cx - bx)), int(round(2 * cy - by)))
+    # 使用 clipLine 保证绘制端点仍位于画面内
+    ok, clipped_start, clipped_end = cv2.clipLine((0, 0, frame_w, frame_h), bank_point, another_bank_point)
+    if ok:
+        cv2.line(overview, clipped_start, clipped_end, (255, 255, 0), 2, cv2.LINE_AA)   # 青色连线
+    cv2.circle(overview, center, 6, (0, 0, 255), -1, cv2.LINE_AA)                       # 中心点红圆
+    cv2.circle(overview, bank_point, 6, (0, 0, 255), -1, cv2.LINE_AA)                   # 岸边点红圆
+    if 0 <= another_bank_point[0] < frame_w and 0 <= another_bank_point[1] < frame_h:
+        cv2.circle(overview, another_bank_point, 6, (0, 0, 255), -1, cv2.LINE_AA)       # 对岸点红圆
 
     # === 3. 计算速度绝对值，用于后续箭头长度归一化 ===
     speed_values: List[float] = []
@@ -269,12 +279,6 @@ def save_batch_overlays(
         start = (int(point[0]), int(point[1]))
         end = (int(point[0] + sign * dx * arrow_len), int(point[1] + sign * dy * arrow_len))
         cv2.arrowedLine(overview, start, end, color, 3, tipLength=0.2)
-
-        # === 6.6 保存单点叠加图 ===
-        filename = f"batch_point_{idx:02d}_overlay.png"
-        out_path = os.path.join(overlay_dir, filename)
-        cv2.imwrite(out_path, overview)
-        print(f"[batch overlay] Saved overlay for point #{idx} -> {out_path}")
 
     # === 7. 保存总览图 ===
     overview_path = os.path.join(overlay_dir, "batch_overview.png")
