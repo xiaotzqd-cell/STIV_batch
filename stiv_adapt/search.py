@@ -14,6 +14,7 @@ from .core import (
     compute_canny_edges,
     push_debug_dir,
     DEBUG_RUN_DIR,
+    _save_img,
 )
 from .vote_accumulator import hough_angle_voting_min
 
@@ -122,6 +123,8 @@ def _adaptive_direction_search_on_frames(
                 sti, half_width_deg=fft_half_width_deg,
                 rmin_ratio=fft_rmin_ratio, rmax_ratio=fft_rmax_ratio
             )
+        else:
+            _save_img("step1_sti_raw.png", sti)
 
         edges = compute_canny_edges(
             sti_in, use_circular_roi=use_circular_roi,
