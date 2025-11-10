@@ -233,8 +233,13 @@ def save_batch_overlays(
             scale = abs(overlay_speed) / max_speed
             arrow_len = int(round(min_arrow_len + scale * (max_arrow_len - min_arrow_len)))
 
-        sign = 1 if (slope is None or slope >= 0) else -1
-        (_, _), (dx, dy) = _line_endpoints(point, 2, angle)  # 仅获取单位方向
+        if overlay_speed is not None:
+            sign = 1 if overlay_speed >= 0 else -1
+        else:
+            sign = 1 if (slope is None or slope >= 0) else -1
+
+        _, direction = _line_endpoints(point, 2, angle)  # 仅获取单位方向
+        dx, dy = direction
         start = (int(point[0]), int(point[1]))
         end = (int(point[0] + sign * dx * arrow_len), int(point[1] + sign * dy * arrow_len))
         cv2.arrowedLine(overview, start, end, color, 3, tipLength=0.2)
