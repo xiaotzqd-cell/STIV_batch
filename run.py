@@ -10,18 +10,18 @@ VIDEO = r"D:\Programs\Python\stiv1\CRR.MP4"
 CENTER: Tuple[int, int] =(1870, 1117)  # ← 手动中心点（像素坐标）
 
 #多点测速参数
-USE_BATCH_LINE_PROBING = True # ← 开启多点测速
+USE_BATCH_LINE_PROBING = False # ← 开启多点测速
 BANK_POINT: Tuple[int, int] = (533, 1120) # 岸边点（与 CENTER 组成测速直线）
 PROBE_INTERVAL_PX = 500 # 两测点之间的像素间隔（从中心点向两端延伸）
 # STI 测线参数（角度搜索范围：线方向）
-LENGTH_PX = 200
-ANGLE_START, ANGLE_END, ANGLE_STEP = -90, -87, 1   # 遍历的“测速线角度”
-MAX_FRAMES = 200
+LENGTH_PX = 300
+ANGLE_START, ANGLE_END, ANGLE_STEP = -150, -45, 1   # 遍历的“测速线角度”
+MAX_FRAMES = 300
 USE_ROI = True
 VERBOSE = True
 
 # 频域扇形增强（用于评分）
-USE_FFT_FAN = True
+USE_FFT_FAN = False
 FFT_HALF_DEG = 4
 FFT_RMIN_RATIO = 0.15
 FFT_RMAX_RATIO = 0.9
