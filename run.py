@@ -12,10 +12,10 @@ CENTER: Tuple[int, int] =(1870, 1117)  # ← 手动中心点（像素坐标）
 #多点测速参数
 USE_BATCH_LINE_PROBING = True # ← 开启多点测速
 BANK_POINT: Tuple[int, int] = (533, 1120) # 岸边点（与 CENTER 组成测速直线）
-PROBE_INTERVAL_PX = 300 # 两测点之间的像素间隔（从中心点向两端延伸）
+PROBE_INTERVAL_PX = 400 # 两测点之间的像素间隔（从中心点向两端延伸）
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 200
-ANGLE_START, ANGLE_END, ANGLE_STEP = -120, -70, 1   # 遍历的“测速线角度”
+ANGLE_START, ANGLE_END, ANGLE_STEP = -90, -80, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 200
 USE_ROI = True
 VERBOSE = True

@@ -1,0 +1,10 @@
+﻿__pycache__/
+*.py[cod]
+*.pyo
+.idea/
+out/
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.MP4
