@@ -12,10 +12,10 @@ CENTER: Tuple[int, int] =(1870, 1117)  # ← 手动中心点（像素坐标）
 #多点测速参数
 USE_BATCH_LINE_PROBING = True # ← 开启多点测速
 BANK_POINT: Tuple[int, int] = (533, 1120) # 岸边点（与 CENTER 组成测速直线）
-PROBE_INTERVAL_PX = 400 # 两测点之间的像素间隔（从中心点向两端延伸）
+PROBE_INTERVAL_PX = 500 # 两测点之间的像素间隔（从中心点向两端延伸）
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 200
-ANGLE_START, ANGLE_END, ANGLE_STEP = -90, -80, 1   # 遍历的“测速线角度”
+ANGLE_START, ANGLE_END, ANGLE_STEP = -90, -87, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 200
 USE_ROI = True
 VERBOSE = True
@@ -153,11 +153,20 @@ def save_batch_overlays(
     m_per_px: Optional[float],
     default_fps: Optional[float],
 ) -> None:
-    """在首帧上绘制所有多点测速结果，并生成单点叠加图。"""
+    """
+    功能：在视频首帧上绘制“多点测速”的整体结果，并为每个测点生成单独的叠加图。
+    主要可视化要素：
+        - 中心点与岸边点、基准测线；
+        - 每个探测点的测速截线、点位标识；
+        - 速度文本（m/s）；
+        - 按速度大小归一化的方向箭头。
+    """
 
+    # 若结果为空则直接返回
     if not batch_results:
         return
 
+    # === 1. 读取视频首帧 ===
     cap = cv2.VideoCapture(video_path)
     ok, frame0 = cap.read()
     cap.release()
@@ -165,20 +174,27 @@ def save_batch_overlays(
         print("[batch overlay] 无法读取首帧，跳过叠加图保存")
         return
 
+    # 复制首帧作为绘图底图
     overview = frame0.copy()
-    cv2.line(overview, center, bank_point, (255, 255, 0), 2, cv2.LINE_AA)
-    cv2.circle(overview, center, 6, (0, 0, 255), -1, cv2.LINE_AA)
-    cv2.circle(overview, bank_point, 6, (0, 0, 255), -1, cv2.LINE_AA)
 
-    # 预先统计速度绝对值用于归一化箭头长度
+    # === 2. 绘制中心点、岸边点及基准连线 ===
+    cv2.line(overview, center, bank_point, (255, 255, 0), 2, cv2.LINE_AA)   # 青色连线
+    cv2.circle(overview, center, 6, (0, 0, 255), -1, cv2.LINE_AA)           # 中心点红圆
+    cv2.circle(overview, bank_point, 6, (0, 0, 255), -1, cv2.LINE_AA)       # 岸边点红圆
+
+    # === 3. 计算速度绝对值，用于后续箭头长度归一化 ===
     speed_values: List[float] = []
     for row in batch_results:
         spd = row.get("speed_m_per_s")
+
+        # 若没有直接给出速度，则用 slope * m_per_px * fps 计算
         if spd is None:
             slope = row.get("slope_px_per_frame")
             fps_here = row.get("fps") or default_fps
             if slope is not None and m_per_px is not None and fps_here:
                 spd = slope * m_per_px * fps_here
+
+        # 若得到有效速度，则保存至临时字段 "_overlay_speed_mps"
         if spd is not None:
             try:
                 row["_overlay_speed_mps"] = float(spd)
@@ -188,6 +204,7 @@ def save_batch_overlays(
 
     max_speed = max(speed_values) if speed_values else None
 
+    # === 4. 定义颜色组，用于不同测点区分 ===
     colors = [
         (0, 255, 255),
         (0, 165, 255),
@@ -197,35 +214,42 @@ def save_batch_overlays(
         (255, 255, 0),
     ]
 
+    # === 5. 创建输出文件夹 ===
     overlay_dir = os.path.join(outdir, "batch_overlays")
     os.makedirs(overlay_dir, exist_ok=True)
 
+    # === 6. 遍历每个测点，绘制截线、速度文本与箭头 ===
     for row in batch_results:
         angle = row.get("angle_probe_deg")
         if angle is None:
-            continue
+            continue  # 无方向则跳过
+
         idx = int(row.get("index", 0))
         point = (int(row.get("point_x", 0)), int(row.get("point_y", 0)))
         length = int(row.get("length_px", LENGTH_PX))
         slope = row.get("slope_px_per_frame")
         fps_here = row.get("fps") or default_fps
-        color = colors[idx % len(colors)]
+        color = colors[idx % len(colors)]  # 循环取色
 
+        # === 6.1 绘制测速截线及点位 ===
         (x1, y1, x2, y2), _ = _line_endpoints(point, length, angle)
         cv2.line(overview, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
         cv2.circle(overview, point, 4, color, -1, cv2.LINE_AA)
 
-        text = f"#{idx:02d}"
+        # === 6.2 绘制文字标签（序号 + 速度） ===
+        text = ""
         speed_val = row.get("speed_m_per_s")
         overlay_speed = row.get("_overlay_speed_mps")
         if overlay_speed is not None:
-            text += f" {overlay_speed:.2f} m/s"
+            text = f" {overlay_speed:.2f} m/s"
         elif speed_val is not None:
-            text += f" {speed_val:.2f} m/s"
+            text = f" {speed_val:.2f} m/s"
+        else:
+            text = "N/A"
         cv2.putText(overview, text, (point[0] + 10, point[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
-        # 箭头长度与速度大小成正比
+        # === 6.3 计算箭头长度（按速度比例缩放） ===
         min_arrow_len = max(20, int(round(length * 0.2)))
         max_arrow_len = max(min_arrow_len + 1, int(round(length * 0.7)))
         arrow_len = min_arrow_len
@@ -233,36 +257,30 @@ def save_batch_overlays(
             scale = abs(overlay_speed) / max_speed
             arrow_len = int(round(min_arrow_len + scale * (max_arrow_len - min_arrow_len)))
 
+        # === 6.4 确定箭头方向（正负速度） ===
         if overlay_speed is not None:
             sign = 1 if overlay_speed >= 0 else -1
         else:
             sign = 1 if (slope is None or slope >= 0) else -1
 
-        _, direction = _line_endpoints(point, 2, angle)  # 仅获取单位方向
+        # === 6.5 画箭头 ===
+        _, direction = _line_endpoints(point, 2, angle)  # 单位方向向量
         dx, dy = direction
         start = (int(point[0]), int(point[1]))
         end = (int(point[0] + sign * dx * arrow_len), int(point[1] + sign * dy * arrow_len))
         cv2.arrowedLine(overview, start, end, color, 3, tipLength=0.2)
 
+        # === 6.6 保存单点叠加图 ===
         filename = f"batch_point_{idx:02d}_overlay.png"
-        save_flow_overlay(
-            video_path=video_path,
-            outdir=overlay_dir,
-            center=point,
-            best_angle_deg=angle,
-            length_px=length,
-            slope_px_per_frame=slope,
-            m_per_px=m_per_px,
-            fps=fps_here,
-            calib_xyxy=None,
-            calib_real_m=None,
-            filename=filename,
-            preview_max_side=1280,
-        )
+        out_path = os.path.join(overlay_dir, filename)
+        cv2.imwrite(out_path, overview)
+        print(f"[batch overlay] Saved overlay for point #{idx} -> {out_path}")
 
+    # === 7. 保存总览图 ===
     overview_path = os.path.join(overlay_dir, "batch_overview.png")
     cv2.imwrite(overview_path, overview)
-    print(f"[batch overlay] {os.path.abspath(overview_path)}")
+    print(f"[batch overlay] 总览图已保存：{overview_path}")
+
 
 def main():
     if not os.path.isfile(VIDEO):
