@@ -358,7 +358,7 @@ def _calculate_extended_line(center: Tuple[int, int],
                               bank_point: Tuple[int, int],
                               interval_px: int,
                               frame_shape: Tuple[int, int]) -> List[Tuple[int, int]]:
-    """沿着 CENTER-岸边线生成多点测速坐标，直到触碰画面边界。"""
+    """沿着 CENTER-岸边线生成多点测速坐标，仅覆盖 bank_point 与对岸对称点之间的区段。"""
     if interval_px <= 0:
         raise ValueError("interval_px 必须为正数")
 
@@ -367,18 +367,20 @@ def _calculate_extended_line(center: Tuple[int, int],
     bx, by = bank_point
     dx = bx - cx
     dy = by - cy
-    length = math.hypot(dx, dy)
-    if length == 0:
+    half_length = math.hypot(dx, dy)
+    if half_length == 0:
         return [center]
 
-    ux = dx / length
-    uy = dy / length
-    max_radius = math.hypot(w, h)
+    ux = dx / half_length
+    uy = dy / half_length
+    # 岸边点关于中心点的对称点，定义测速范围的另一端
+    another_bank_point = (2 * cx - bx, 2 * cy - by)
 
     points: List[Tuple[int, int]] = [center]
     for direction in (1, -1):
         dist = interval_px
-        while dist <= max_radius:
+        # 仅在 bank_point 与其对岸对称点之间取样
+        while dist <= half_length + 1e-6:
             px = cx + direction * ux * dist
             py = cy + direction * uy * dist
             if px < 0 or px >= w or py < 0 or py >= h:
@@ -387,6 +389,13 @@ def _calculate_extended_line(center: Tuple[int, int],
             if pt not in points:
                 points.append(pt)
             dist += interval_px
+
+    # 确保两端点被纳入（若落在画面内）
+    for endpoint in (bank_point, another_bank_point):
+        ex, ey = endpoint
+        if 0 <= ex < w and 0 <= ey < h and endpoint not in points:
+            points.append(endpoint)
+
     return points
 
 
