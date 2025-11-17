@@ -37,7 +37,7 @@ def _draw_line_overlay(sti_u8: np.ndarray,
                        slope: Optional[float],
                        peak_votes: float,
                        save_name: str) -> None:
-    """在 STI 上叠加最佳线方向与文本说明，并保存。"""
+    """在 STI 上叠加最佳线方向与文本说明，并保存到调试目录。"""
     H, W = sti_u8.shape[:2]
     cx, cy = W / 2.0, H / 2.0
     vis = cv2.cvtColor(sti_u8, cv2.COLOR_GRAY2BGR)
@@ -50,7 +50,19 @@ def _draw_line_overlay(sti_u8: np.ndarray,
     text = (f"theta_n={theta_normal_deg:.1f}deg, line={alpha_deg:.1f}deg, "
             f"slope={('None' if slope is None else f'{slope:.4f}')}, peak={peak_votes:.0f}")
     cv2.putText(vis, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
-    cv2.imwrite(save_name, vis)
+
+    # 将保存路径落到 DEBUG_RUN_DIR（若存在），确保文件与本次运行的其他输出在同一目录下
+    path = save_name
+    try:
+        from .core import DEBUG_RUN_DIR, init_debug_dir  # 延迟导入以避免循环
+        base = DEBUG_RUN_DIR or init_debug_dir()
+        if base:
+            path = os.path.join(base, save_name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+    except Exception:
+        pass
+
+    cv2.imwrite(path, vis)
 
 
 def _load_video_frames(video_path: str, max_frames: int) -> Tuple[List[np.ndarray], float]:
@@ -105,6 +117,7 @@ def _adaptive_direction_search_on_frames(
         "score": -1.0,
         "theta_fft": None,
         "sti_raw": None,
+        "sti_filtered": None,
         "fps": fps,
         "angle_probe": None,
     }
@@ -216,11 +229,14 @@ def _adaptive_direction_search_on_frames(
         a_best = best.get("angle_probe", angle_start)
         sti_best = build_sti_from_frames(frames, center, length_px, angle_deg=a_best)
         best["sti_raw"] = sti_best
+        filtered_best = None
         if use_fft_fan_filter and sti_best is not None:
-            _ = enhance_sti_via_fft_fan(
+            filtered_best, theta_fft = enhance_sti_via_fft_fan(
                 sti_best, half_width_deg=fft_half_width_deg,
                 rmin_ratio=fft_rmin_ratio, rmax_ratio=fft_rmax_ratio
             )
+            best["theta_fft"] = theta_fft
+            best["sti_filtered"] = filtered_best
         edges_best = compute_canny_edges(
             sti_best, use_circular_roi=use_circular_roi,
             save_name="step7_canny_edges.png", verbose=verbose
@@ -410,7 +426,18 @@ def batch_probe_along_line(
     angle_start, angle_end, angle_step = angle_range
 
     frame_shape = frames[0].shape[:2]
-    probe_points = _calculate_extended_line(center, bank_point, interval_px, frame_shape)
+    probe_points_raw = _calculate_extended_line(center, bank_point, interval_px, frame_shape)
+
+    # 以岸边点为首位，其余按与岸边点距离排序
+    probe_points: List[Tuple[int, int]] = []
+    seen = set()
+    if bank_point in probe_points_raw:
+        probe_points.append(bank_point)
+        seen.add(bank_point)
+    for pt in sorted(probe_points_raw, key=lambda p: math.hypot(p[0] - bank_point[0], p[1] - bank_point[1])):
+        if pt not in seen:
+            probe_points.append(pt)
+            seen.add(pt)
 
     results: List[Dict[str, Any]] = []
     excel_path = "batch_probe_results.xlsx"
@@ -422,25 +449,35 @@ def batch_probe_along_line(
         pass
 
     for idx, point in enumerate(probe_points):
-        best = _adaptive_direction_search_on_frames(
-            frames,
-            video_fps,
-            point,
-            length_px,
-            angle_start,
-            angle_end,
-            angle_step,
-            use_circular_roi=use_circular_roi,
-            use_fft_fan_filter=use_fft_fan_filter,
-            fft_half_width_deg=fft_half_width_deg,
-            fft_rmin_ratio=fft_rmin_ratio,
-            fft_rmax_ratio=fft_rmax_ratio,
-            verbose=verbose,
-            vote_theta_res_deg=vote_theta_res_deg,
-            vote_k_ratio=vote_k_ratio,
-            vote_theta_range=vote_theta_range,
-            save_candidate_overlays=False,
-        )
+        suffix = f"point_{idx:02d}_x{point[0]}_y{point[1]}"
+        with push_debug_dir(suffix):
+            best = _adaptive_direction_search_on_frames(
+                frames,
+                video_fps,
+                point,
+                length_px,
+                angle_start,
+                angle_end,
+                angle_step,
+                use_circular_roi=use_circular_roi,
+                use_fft_fan_filter=use_fft_fan_filter,
+                fft_half_width_deg=fft_half_width_deg,
+                fft_rmin_ratio=fft_rmin_ratio,
+                fft_rmax_ratio=fft_rmax_ratio,
+                verbose=verbose,
+                vote_theta_res_deg=vote_theta_res_deg,
+                vote_k_ratio=vote_k_ratio,
+                vote_theta_range=vote_theta_range,
+                save_candidate_overlays=False,
+            )
+
+            # 保存处理前后的 STI 到独立文件，便于逐点查看
+            raw_sti = best.get("sti_raw")
+            if raw_sti is not None:
+                _save_img(f"{suffix}_sti_raw.png", raw_sti)
+            filtered_sti = best.get("sti_filtered")
+            if filtered_sti is not None:
+                _save_img(f"{suffix}_sti_filtered.png", filtered_sti)
 
         if fps is not None:
             best["fps"] = float(fps)
