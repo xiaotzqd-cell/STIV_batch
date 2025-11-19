@@ -49,7 +49,29 @@ def _draw_line_overlay(sti_u8: np.ndarray,
     cv2.line(vis, (x1, y1), (x2, y2), (0, 255, 255), 2, cv2.LINE_AA)
     text = (f"theta_n={theta_normal_deg:.1f}deg, line={alpha_deg:.1f}deg, "
             f"slope={('None' if slope is None else f'{slope:.4f}')}, peak={peak_votes:.0f}")
-    cv2.putText(vis, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
+
+    # 根据图像尺寸动态调整文字大小，避免在高分辨率或低分辨率下被裁切
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    margin = max(5, int(round(0.02 * min(H, W))))
+    max_width = max(10, W - 2 * margin)
+    font_scale = max(0.35, min(H, W) / 600.0)
+    thickness = max(1, int(round(font_scale * 2)))
+    (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+    if text_w > max_width:
+        scale_factor = max_width / float(text_w)
+        font_scale = max(0.2, font_scale * scale_factor)
+        thickness = max(1, int(round(font_scale * 2)))
+        (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+
+    text_org = (margin, min(H - baseline - 1, margin + text_h))
+    cv2.rectangle(
+        vis,
+        (text_org[0] - 4, text_org[1] - text_h - baseline - 4),
+        (text_org[0] + text_w + 4, text_org[1] + baseline + 4),
+        (0, 0, 0),
+        -1,
+    )
+    cv2.putText(vis, text, text_org, font, font_scale, (0, 255, 255), thickness, cv2.LINE_AA)
 
     # 将保存路径落到 DEBUG_RUN_DIR（若存在），确保文件与本次运行的其他输出在同一目录下
     path = save_name
