@@ -10,12 +10,12 @@ VIDEO = r"D:\Programs\Python\stiv1\CRR.MP4"
 CENTER: Tuple[int, int] =(1987, 570)#(1870, 1117)  # ← 手动中心点（像素坐标）
 
 #多点测速参数
-USE_BATCH_LINE_PROBING = False # ← 开启多点测速
+USE_BATCH_LINE_PROBING = True # ← 开启多点测速
 BANK_POINT: Tuple[int, int] = (783, 577)#(533, 1120) # 岸边点（与 CENTER 组成测速直线）
 PROBE_INTERVAL_PX = 200 # 两测点之间的像素间隔（从中心点向两端延伸）
 # 速度阈值设置（仅用于多点测速叠加图的显示；设为 None 表示不启用该侧阈值）
-V_MIN: Optional[float] = None
-V_MAX: Optional[float] = None
+V_MIN: Optional[float] = 0.1
+V_MAX: Optional[float] = 5
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 256
 ANGLE_START, ANGLE_END, ANGLE_STEP = -92, -88, 1   # 遍历的“测速线角度”
@@ -24,7 +24,7 @@ USE_ROI = True
 VERBOSE = True
 
 # 频域扇形增强（用于评分）
-USE_FFT_FAN = True
+USE_FFT_FAN = False
 FFT_HALF_DEG = 4
 FFT_RMIN_RATIO = 0.15
 FFT_RMAX_RATIO = 0.9
@@ -278,6 +278,13 @@ def save_batch_overlays(
             text = "N/A"
         cv2.putText(overview, text, (point[0] + 10, point[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        if not within_speed_range:
+            cv2.drawMarker(overview, point, (0, 0, 255),
+                           markerType=cv2.MARKER_TILTED_CROSS,
+                           markerSize=max(12, int(round(length * 0.2))),
+                           thickness=2, line_type=cv2.LINE_AA)
+            continue
 
         # === 6.3 计算箭头长度（按速度比例缩放） ===
         min_arrow_len = max(20, int(round(length * 0.2)))
