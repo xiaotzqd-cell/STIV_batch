@@ -4,13 +4,19 @@ core.py — STI 的构建、FFT 扇形滤波增强、以及 Canny+Hough 评分
 每个关键步骤都会保存调试图片到 DEBUG_RUN_DIR。
 """
 import os, math, time
+import sys
+import pathlib
 from typing import Tuple, List, Optional, Dict
 from contextlib import contextmanager
 
 import cv2
 import numpy as np
 
-from .vote_accumulator import hough_angle_voting_min  # 相对导入
+if __package__ in (None, ""):
+    # 允许直接运行本文件时找到顶层 stiv_adapt 包
+    sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
+
+from stiv_adapt.vote_accumulator import hough_angle_voting_min  # 绝对导入，兼容脚本直接运行
 
 # === 输出目录管理 ===
 DEBUG_RUN_DIR: Optional[str] = None
