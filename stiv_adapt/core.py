@@ -180,10 +180,13 @@ def _angdiff_deg(a, b):
 def compute_canny_edges(sti_u8: np.ndarray,
                         use_circular_roi: bool = False,
                         save_name: str = "step7_canny_edges.png",
+                        pre_canny_save_name: Optional[str] = "step6_pre_canny_eq_blur.png",
                         verbose: bool = False) -> np.ndarray:
     H, W = sti_u8.shape[:2]
     eq   = cv2.equalizeHist(sti_u8)
     blur = cv2.GaussianBlur(eq, (5, 5), 0)
+    if pre_canny_save_name:
+        _save_img(pre_canny_save_name, blur)
     v    = float(np.median(blur))
     low  = int(max(0,   0.66 * v))
     high = int(min(255, 1.33 * v))
