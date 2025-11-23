@@ -406,7 +406,7 @@ def _calculate_extended_line(center: Tuple[int, int],
     for direction in (1, -1):
         dist = interval_px
         # 仅在 bank_point 与其对岸对称点之间取样
-        while dist <= half_length + 1e-6:
+        while dist < half_length - 1e-6:
             px = cx + direction * ux * dist
             py = cy + direction * uy * dist
             if px < 0 or px >= w or py < 0 or py >= h:
@@ -415,12 +415,6 @@ def _calculate_extended_line(center: Tuple[int, int],
             if pt not in points:
                 points.append(pt)
             dist += interval_px
-
-    # 确保两端点被纳入（若落在画面内）
-    for endpoint in (bank_point, another_bank_point):
-        ex, ey = endpoint
-        if 0 <= ex < w and 0 <= ey < h and endpoint not in points:
-            points.append(endpoint)
 
     return points
 

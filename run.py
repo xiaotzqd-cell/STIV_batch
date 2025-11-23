@@ -13,6 +13,9 @@ CENTER: Tuple[int, int] =(1987, 570)#(1870, 1117)  # ← 手动中心点（像�
 USE_BATCH_LINE_PROBING = False # ← 开启多点测速
 BANK_POINT: Tuple[int, int] = (783, 577)#(533, 1120) # 岸边点（与 CENTER 组成测速直线）
 PROBE_INTERVAL_PX = 200 # 两测点之间的像素间隔（从中心点向两端延伸）
+# 速度阈值设置（仅用于多点测速叠加图的显示；设为 None 表示不启用该侧阈值）
+V_MIN: Optional[float] = None
+V_MAX: Optional[float] = None
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 256
 ANGLE_START, ANGLE_END, ANGLE_STEP = -92, -88, 1   # 遍历的“测速线角度”
@@ -150,6 +153,8 @@ def save_batch_overlays(
     *,
     m_per_px: Optional[float],
     default_fps: Optional[float],
+    v_min: Optional[float] = None,
+    v_max: Optional[float] = None,
 ) -> None:
     """
     功能：在视频首帧上绘制“多点测速”的整体结果，并为每个测点生成单独的叠加图。
@@ -248,6 +253,15 @@ def save_batch_overlays(
         text = ""
         speed_val = row.get("speed_m_per_s")
         overlay_speed = row.get("_overlay_speed_mps")
+        speed_for_check = overlay_speed if overlay_speed is not None else speed_val
+        if v_min is None and v_max is None:
+            within_speed_range = True
+        else:
+            within_speed_range = False
+            if speed_for_check is not None:
+                abs_speed = abs(speed_for_check)
+                within_speed_range = ((v_min is None or abs_speed >= v_min) and
+                                      (v_max is None or abs_speed <= v_max))
         if overlay_speed is not None:
             text = f" {overlay_speed:.2f} m/s"
         elif speed_val is not None:
@@ -256,6 +270,13 @@ def save_batch_overlays(
             text = "N/A"
         cv2.putText(overview, text, (point[0] + 10, point[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        if not within_speed_range:
+            cv2.drawMarker(overview, point, (0, 0, 255),
+                           markerType=cv2.MARKER_TILTED_CROSS,
+                           markerSize=max(12, int(round(length * 0.2))),
+                           thickness=2, line_type=cv2.LINE_AA)
+            continue
 
         # === 6.3 计算箭头长度（按速度比例缩放） ===
         min_arrow_len = max(20, int(round(length * 0.2)))
@@ -343,6 +364,8 @@ def main():
             batch_results=results,
             m_per_px=m_per_px,
             default_fps=FPS,
+            v_min=V_MIN,
+            v_max=V_MAX,
         )
         return
 
