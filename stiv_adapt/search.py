@@ -163,7 +163,9 @@ def _adaptive_direction_search_on_frames(
 
         edges = compute_canny_edges(
             sti_in, use_circular_roi=use_circular_roi,
-            save_name="step7_canny_edges_tmp.png", verbose=False
+            save_name="step7_canny_edges_tmp.png",
+            pre_canny_save_name="step6_pre_canny_eq_blur_tmp.png",
+            verbose=False
         )
 
         # —— 6 项解包（论文口径 + 双线性入桶）——
@@ -261,7 +263,9 @@ def _adaptive_direction_search_on_frames(
             best["sti_filtered"] = filtered_best
         edges_best = compute_canny_edges(
             sti_best, use_circular_roi=use_circular_roi,
-            save_name="step7_canny_edges.png", verbose=verbose
+            save_name="step7_canny_edges.png",
+            pre_canny_save_name="step6_pre_canny_eq_blur.png",
+            verbose=verbose
         )
 
         total, angle_votes, votes_full, theta_axis, _, _ = hough_angle_voting_min(
