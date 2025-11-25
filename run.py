@@ -12,7 +12,7 @@ CENTER: Tuple[int, int] =(1387, 573)#(1870, 1117)  # ← 手动中心点（像�
 #多点测速参数
 USE_BATCH_LINE_PROBING = True # ← 开启多点测速
 BANK_POINT: Tuple[int, int] = (783, 577)#(533, 1120) # 岸边点（与 CENTER 组成测速直线）
-PROBE_INTERVAL_PX = 500 # 两测点之间的像素间隔（从中心点向两端延伸）
+PROBE_INTERVAL_PX = 300 # 两测点之间的像素间隔（从中心点向两端延伸）
 # 速度阈值设置（仅用于多点测速叠加图的显示；设为 None 表示不启用该侧阈值）
 V_MIN: Optional[float] = 0.1
 V_MAX: Optional[float] = 5
