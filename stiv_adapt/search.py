@@ -390,6 +390,10 @@ def _calculate_extended_line(center: Tuple[int, int],
         - 以 center 为起点，按照 interval_px 间隔向两端扩展；
         - 只取落在画面内的点；
         - 终点（岸边点及其对称点）不计入测速点列表。
+
+    为了避免一侧过早因越界被 `break` 截断，向两个方向的最大可走距离
+    会被限制为“到岸边点的距离”与“到画面边界的距离”两者中的较小值。
+    这样即使岸边点在画面外，也能尽量向另一侧填满测速点。
     """
     if interval_px <= 0:
         raise ValueError("interval_px 必须为正数")
@@ -407,11 +411,21 @@ def _calculate_extended_line(center: Tuple[int, int],
     uy = dy / length
     points: List[Tuple[int, int]] = [center]
 
+    def _dist_to_frame_edge(ux: float, uy: float) -> float:
+        """返回从中心沿 (ux, uy) 方向走到画面外的最小距离。"""
+        tx = (w - 1 - cx) / ux if ux > 0 else ((0 - cx) / ux if ux < 0 else float("inf"))
+        ty = (h - 1 - cy) / uy if uy > 0 else ((0 - cy) / uy if uy < 0 else float("inf"))
+        candidates = [t for t in (tx, ty) if t >= 0]
+        return min(candidates) if candidates else 0.0
+
     # 从中心向两侧扩展，但不包含两端点（<= 改为 <）
-    max_dist = length
     for direction in (1, -1):
+        # 计算当前方向到画面边界的最大距离，避免首个点越界后整段被截断
+        edge_dist = _dist_to_frame_edge(direction * ux, direction * uy)
+        # 顺着岸边方向受岸边距离限制，反向仅受边界限制，保证中心两侧都有机会生成测速点
+        max_dist_dir = min(length, edge_dist) if direction == 1 else edge_dist
         dist = interval_px
-        while dist < max_dist:
+        while dist < max_dist_dir:
             px = cx + direction * ux * dist
             py = cy + direction * uy * dist
             if px < 0 or px >= w or py < 0 or py >= h:
