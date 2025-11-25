@@ -466,13 +466,24 @@ def batch_probe_along_line(
 
     frame_shape = frames[0].shape[:2]
     probe_points_raw = _calculate_extended_line(center, bank_point, interval_px, frame_shape)
+    symmetric_point = (
+        int(round(2 * center[0] - bank_point[0])),
+        int(round(2 * center[1] - bank_point[1])),
+    )
+
+    def _in_frame(pt: Tuple[int, int]) -> bool:
+        h, w = frame_shape
+        return 0 <= pt[0] < w and 0 <= pt[1] < h
 
     # 以岸边点为首位，其余按与岸边点距离排序
     probe_points: List[Tuple[int, int]] = []
     seen = set()
-    if bank_point in probe_points_raw:
+    if _in_frame(bank_point) and bank_point not in seen:
         probe_points.append(bank_point)
         seen.add(bank_point)
+    if _in_frame(symmetric_point) and symmetric_point not in seen:
+        probe_points.append(symmetric_point)
+        seen.add(symmetric_point)
     for pt in sorted(probe_points_raw, key=lambda p: math.hypot(p[0] - bank_point[0], p[1] - bank_point[1])):
         if pt not in seen:
             probe_points.append(pt)
