@@ -411,21 +411,11 @@ def _calculate_extended_line(center: Tuple[int, int],
     uy = dy / length
     points: List[Tuple[int, int]] = [center]
 
-    def _dist_to_frame_edge(ux: float, uy: float) -> float:
-        """返回从中心沿 (ux, uy) 方向走到画面外的最小距离。"""
-        tx = (w - 1 - cx) / ux if ux > 0 else ((0 - cx) / ux if ux < 0 else float("inf"))
-        ty = (h - 1 - cy) / uy if uy > 0 else ((0 - cy) / uy if uy < 0 else float("inf"))
-        candidates = [t for t in (tx, ty) if t >= 0]
-        return min(candidates) if candidates else 0.0
-
-    # 从中心向两侧扩展，但不包含两端点（<= 改为 <）
+    # 从中心向两侧等距扩展，距离上限仅由「岸边距离」约束
+    max_dist_dir = length
     for direction in (1, -1):
-        # 计算当前方向到画面边界的最大距离，避免首个点越界后整段被截断
-        edge_dist = _dist_to_frame_edge(direction * ux, direction * uy)
-        # 两侧都以“岸边距离”和“画面边界”共同约束，反向延伸到对称点即可
-        max_dist_dir = min(length, edge_dist)
         dist = interval_px
-        while dist < max_dist_dir:
+        while dist <= max_dist_dir:
             px = cx + direction * ux * dist
             py = cy + direction * uy * dist
             if px < 0 or px >= w or py < 0 or py >= h:
