@@ -384,7 +384,13 @@ def _calculate_extended_line(center: Tuple[int, int],
                               bank_point: Tuple[int, int],
                               interval_px: int,
                               frame_shape: Tuple[int, int]) -> List[Tuple[int, int]]:
-    """沿着 CENTER-岸边线生成多点测速坐标，延伸至岸边点及其对称点。"""
+    """沿着 CENTER-岸边线生成多点测速坐标，延伸至岸边点及其对称点。
+
+    生成规则：
+        - 以 center 为起点，按照 interval_px 间隔向两端扩展；
+        - 只取落在画面内的点；
+        - 终点（岸边点及其对称点）不计入测速点列表。
+    """
     if interval_px <= 0:
         raise ValueError("interval_px 必须为正数")
 
@@ -399,13 +405,13 @@ def _calculate_extended_line(center: Tuple[int, int],
 
     ux = dx / length
     uy = dy / length
-    max_dist = length
-
     points: List[Tuple[int, int]] = [center]
+
+    # 从中心向两侧扩展，但不包含两端点（<= 改为 <）
+    max_dist = length
     for direction in (1, -1):
         dist = interval_px
-        # 从中心向两端递进，直到超过岸边点或其对称点
-        while dist <= max_dist:
+        while dist < max_dist:
             px = cx + direction * ux * dist
             py = cy + direction * uy * dist
             if px < 0 or px >= w or py < 0 or py >= h:
