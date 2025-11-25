@@ -7,24 +7,24 @@ from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 # ========== 用户配置区（按需修改） ==========
 VIDEO = r"D:\Programs\Python\stiv1\CRR.MP4"
-CENTER: Tuple[int, int] =(1987, 570)#(1870, 1117)  # ← 手动中心点（像素坐标）
+CENTER: Tuple[int, int] =(1387, 573)#(1870, 1117)  # ← 手动中心点（像素坐标）
 
 #多点测速参数
 USE_BATCH_LINE_PROBING = False # ← 开启多点测速
 BANK_POINT: Tuple[int, int] = (783, 577)#(533, 1120) # 岸边点（与 CENTER 组成测速直线）
 PROBE_INTERVAL_PX = 200 # 两测点之间的像素间隔（从中心点向两端延伸）
 # 速度阈值设置（仅用于多点测速叠加图的显示；设为 None 表示不启用该侧阈值）
-V_MIN: Optional[float] = None
-V_MAX: Optional[float] = None
+V_MIN: Optional[float] = 0.1
+V_MAX: Optional[float] = 5
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 256
-ANGLE_START, ANGLE_END, ANGLE_STEP = -92, -88, 1   # 遍历的“测速线角度”
+ANGLE_START, ANGLE_END, ANGLE_STEP = -135, -45, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 256
 USE_ROI = True
 VERBOSE = True
 
 # 频域扇形增强（用于评分）
-USE_FFT_FAN = True
+USE_FFT_FAN = False
 FFT_HALF_DEG = 4
 FFT_RMIN_RATIO = 0.15
 FFT_RMAX_RATIO = 0.9
@@ -244,13 +244,6 @@ def save_batch_overlays(
         fps_here = row.get("fps") or default_fps
         color = colors[idx % len(colors)]  # 循环取色
 
-        # === 6.1 绘制测速截线及点位 ===
-        (x1, y1, x2, y2), _ = _line_endpoints(point, length, angle)
-        cv2.line(overview, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
-        cv2.circle(overview, point, 4, color, -1, cv2.LINE_AA)
-
-        # === 6.2 绘制文字标签（序号 + 速度） ===
-        text = ""
         speed_val = row.get("speed_m_per_s")
         overlay_speed = row.get("_overlay_speed_mps")
         speed_for_check = overlay_speed if overlay_speed is not None else speed_val
@@ -262,6 +255,21 @@ def save_batch_overlays(
                 abs_speed = abs(speed_for_check)
                 within_speed_range = ((v_min is None or abs_speed >= v_min) and
                                       (v_max is None or abs_speed <= v_max))
+
+        if not within_speed_range:
+            cv2.drawMarker(overview, point, (0, 0, 255),
+                           markerType=cv2.MARKER_TILTED_CROSS,
+                           markerSize=max(6, int(round(length * 0.1))),
+                           thickness=2, line_type=cv2.LINE_AA)
+            continue
+
+        # === 6.1 绘制测速截线及点位 ===
+        (x1, y1, x2, y2), _ = _line_endpoints(point, length, angle)
+        cv2.line(overview, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
+        cv2.circle(overview, point, 4, color, -1, cv2.LINE_AA)
+
+        # === 6.2 绘制文字标签（序号 + 速度） ===
+        text = ""
         if overlay_speed is not None:
             text = f" {overlay_speed:.2f} m/s"
         elif speed_val is not None:
