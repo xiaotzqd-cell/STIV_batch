@@ -271,7 +271,7 @@ def save_batch_overlays(
             cv2.line(overview, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
             cv2.circle(overview, point, 4, color, -1, cv2.LINE_AA)
 
-        # === 6.2 绘制文字标签（序号 + 速度） ===
+        # === 6.3 绘制文字标签（序号 + 速度） ===
         text = ""
         if overlay_speed is not None:
             text = f" {overlay_speed:.2f} m/s"
