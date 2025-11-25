@@ -20,6 +20,10 @@ MAX_FRAMES = 256
 USE_ROI = True
 VERBOSE = True
 
+# 速度阈值设置（m/s），可按需修改；留 None 表示不限制
+V_MIN: Optional[float] = None
+V_MAX: Optional[float] = None
+
 # 频域扇形增强（用于评分）
 USE_FFT_FAN = True
 FFT_HALF_DEG = 4
@@ -52,6 +56,20 @@ def compute_scale_from_first_frame(video_path: str,
     m_per_px = real_meters / px
     print(f"[calib] 像素距离={px:.2f}px, 真实距离={real_meters:.3f}m -> SCALE_M_PER_PIXEL={m_per_px:.6f} m/px")
     return m_per_px
+
+
+def _is_speed_out_of_range(speed: Optional[float]) -> bool:
+    """依据 V_MIN/V_MAX 判断速度是否超出允许范围（按绝对值比较）。"""
+
+    if speed is None:
+        return False
+
+    abs_speed = abs(speed)
+    if V_MIN is not None and abs_speed < V_MIN:
+        return True
+    if V_MAX is not None and abs_speed > V_MAX:
+        return True
+    return False
 
 
 def _line_endpoints(center, length_px, angle_deg):
@@ -205,10 +223,13 @@ def save_batch_overlays(
         # 若得到有效速度，则保存至临时字段 "_overlay_speed_mps"
         if spd is not None:
             try:
-                row["_overlay_speed_mps"] = float(spd)
+                overlay_speed = float(spd)
             except (TypeError, ValueError):
                 continue
-            speed_values.append(abs(row["_overlay_speed_mps"]))
+            row["_overlay_speed_mps"] = overlay_speed
+
+            if not _is_speed_out_of_range(overlay_speed):
+                speed_values.append(abs(overlay_speed))
 
     max_speed = max(speed_values) if speed_values else None
 
@@ -239,25 +260,38 @@ def save_batch_overlays(
         fps_here = row.get("fps") or default_fps
         color = colors[idx % len(colors)]  # 循环取色
 
-        # === 6.1 绘制测速截线及点位 ===
+        speed_val = row.get("speed_m_per_s")
+        overlay_speed = row.get("_overlay_speed_mps")
+        speed_for_check = overlay_speed if overlay_speed is not None else speed_val
+        out_of_range = _is_speed_out_of_range(speed_for_check)
+
+        # === 6.1 若速度越界：只画红色叉号，跳过其他标注 ===
+        if out_of_range:
+            cross_size = max(6, int(round(length * 0.1)))
+            cv2.line(overview, (point[0] - cross_size, point[1] - cross_size),
+                     (point[0] + cross_size, point[1] + cross_size), (0, 0, 255), 2, cv2.LINE_AA)
+            cv2.line(overview, (point[0] - cross_size, point[1] + cross_size),
+                     (point[0] + cross_size, point[1] - cross_size), (0, 0, 255), 2, cv2.LINE_AA)
+            continue
+
+        # === 6.2 绘制测速截线及点位 ===
         (x1, y1, x2, y2), _ = _line_endpoints(point, length, angle)
         cv2.line(overview, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
         cv2.circle(overview, point, 4, color, -1, cv2.LINE_AA)
 
-        # === 6.2 绘制文字标签（序号 + 速度） ===
+        # === 6.3 绘制文字标签（序号 + 速度） ===
         text = ""
-        speed_val = row.get("speed_m_per_s")
-        overlay_speed = row.get("_overlay_speed_mps")
         if overlay_speed is not None:
             text = f" {overlay_speed:.2f} m/s"
         elif speed_val is not None:
             text = f" {speed_val:.2f} m/s"
         else:
             text = "N/A"
+
         cv2.putText(overview, text, (point[0] + 10, point[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
-        # === 6.3 计算箭头长度（按速度比例缩放） ===
+        # === 6.4 计算箭头长度（按速度比例缩放） ===
         min_arrow_len = max(20, int(round(length * 0.2)))
         max_arrow_len = max(min_arrow_len + 1, int(round(length * 0.7)))
         arrow_len = min_arrow_len
@@ -265,13 +299,13 @@ def save_batch_overlays(
             scale = abs(overlay_speed) / max_speed
             arrow_len = int(round(min_arrow_len + scale * (max_arrow_len - min_arrow_len)))
 
-        # === 6.4 确定箭头方向（正负速度） ===
+        # === 6.5 确定箭头方向（正负速度） ===
         if overlay_speed is not None:
             sign = 1 if overlay_speed >= 0 else -1
         else:
             sign = 1 if (slope is None or slope >= 0) else -1
 
-        # === 6.5 画箭头 ===
+        # === 6.6 画箭头 ===
         _, direction = _line_endpoints(point, 2, angle)  # 单位方向向量
         dx, dy = direction
         start = (int(point[0]), int(point[1]))
@@ -292,6 +326,7 @@ def main():
     print(f"[out] 所有步骤图将保存到：{outdir}")
     print(f"[cfg] CENTER={CENTER}, LENGTH_PX={LENGTH_PX}, ANGLES=({ANGLE_START},{ANGLE_END},{ANGLE_STEP}), "
           f"MAX_FRAMES={MAX_FRAMES}, USE_ROI={USE_ROI}")
+    print(f"[cfg] V_MIN={V_MIN}, V_MAX={V_MAX} (单位：m/s，None 表示不限制)")
 
     # 计算/确定比例尺
     m_per_px = SCALE_M_PER_PIXEL
