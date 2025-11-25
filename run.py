@@ -265,19 +265,11 @@ def save_batch_overlays(
         speed_for_check = overlay_speed if overlay_speed is not None else speed_val
         out_of_range = _is_speed_out_of_range(speed_for_check)
 
-        # === 6.1 若速度越界：只画红色叉号，跳过其他标注 ===
-        if out_of_range:
-            cross_size = max(6, int(round(length * 0.1)))
-            cv2.line(overview, (point[0] - cross_size, point[1] - cross_size),
-                     (point[0] + cross_size, point[1] + cross_size), (0, 0, 255), 2, cv2.LINE_AA)
-            cv2.line(overview, (point[0] - cross_size, point[1] + cross_size),
-                     (point[0] + cross_size, point[1] - cross_size), (0, 0, 255), 2, cv2.LINE_AA)
-            continue
-
-        # === 6.2 绘制测速截线及点位 ===
-        (x1, y1, x2, y2), _ = _line_endpoints(point, length, angle)
-        cv2.line(overview, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
-        cv2.circle(overview, point, 4, color, -1, cv2.LINE_AA)
+        # === 6.1 绘制测速截线及点位 ===
+        if not out_of_range:
+            (x1, y1, x2, y2), _ = _line_endpoints(point, length, angle)
+            cv2.line(overview, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
+            cv2.circle(overview, point, 4, color, -1, cv2.LINE_AA)
 
         # === 6.3 绘制文字标签（序号 + 速度） ===
         text = ""
@@ -288,8 +280,20 @@ def save_batch_overlays(
         else:
             text = "N/A"
 
+        if out_of_range:
+            text = f"{text} (超出范围)"
+
         cv2.putText(overview, text, (point[0] + 10, point[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        # === 6.3 速度越界时标记叉号并跳过方向绘制 ===
+        if out_of_range:
+            cross_size = max(6, int(round(length * 0.1)))
+            cv2.line(overview, (point[0] - cross_size, point[1] - cross_size),
+                     (point[0] + cross_size, point[1] + cross_size), (0, 0, 255), 2, cv2.LINE_AA)
+            cv2.line(overview, (point[0] - cross_size, point[1] + cross_size),
+                     (point[0] + cross_size, point[1] - cross_size), (0, 0, 255), 2, cv2.LINE_AA)
+            continue
 
         # === 6.4 计算箭头长度（按速度比例缩放） ===
         min_arrow_len = max(20, int(round(length * 0.2)))
