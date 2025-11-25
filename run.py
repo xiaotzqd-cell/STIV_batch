@@ -21,8 +21,8 @@ USE_ROI = True
 VERBOSE = True
 
 # 速度阈值设置（m/s），可按需修改；留 None 表示不限制
-V_MIN: Optional[float] = None
-V_MAX: Optional[float] = None
+V_MIN: Optional[float] = 1
+V_MAX: Optional[float] = 6
 
 # 频域扇形增强（用于评分）
 USE_FFT_FAN = True
