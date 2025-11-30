@@ -16,6 +16,7 @@ from .core import (
     DEBUG_RUN_DIR,
     _save_img,
 )
+from .sobel import compute_sobel_edges
 from .vote_accumulator import hough_angle_voting_min
 
 vote_rho_step = 1
@@ -119,6 +120,9 @@ def _adaptive_direction_search_on_frames(
     angle_step: float,
     *,
     use_circular_roi: bool,
+    roi_radius_frac: float,
+    edge_method: str,
+    use_sobel_highpass: bool,
     use_fft_fan_filter: bool,
     fft_half_width_deg: float,
     fft_rmin_ratio: float,
@@ -144,6 +148,10 @@ def _adaptive_direction_search_on_frames(
         "angle_probe": None,
     }
 
+    edge_method = (edge_method or "canny").lower()
+    if edge_method not in {"canny", "sobel"}:
+        edge_method = "canny"
+
     n_lines = 0
     a = angle_start    #测速线角度
     while a <= angle_end + 1e-6:
@@ -161,12 +169,24 @@ def _adaptive_direction_search_on_frames(
         else:
             _save_img("step1_sti_raw.png", sti)
 
-        edges = compute_canny_edges(
-            sti_in, use_circular_roi=use_circular_roi,
-            save_name="step7_canny_edges_tmp.png",
-            pre_canny_save_name="step6_pre_canny_eq_blur_tmp.png",
-            verbose=False
-        )
+        if edge_method == "sobel":
+            edges = compute_sobel_edges(
+                sti_in,
+                use_highpass=use_sobel_highpass,
+                use_circular_roi=use_circular_roi,
+                roi_radius_frac=roi_radius_frac,
+                save_mag_name="step6_sobel_mag_tmp.png",
+                save_edge_name="step7_sobel_edges_tmp.png",
+                verbose=False,
+            )
+        else:
+            edges = compute_canny_edges(
+                sti_in, use_circular_roi=use_circular_roi,
+                roi_radius_frac=roi_radius_frac,
+                save_name="step7_canny_edges_tmp.png",
+                pre_canny_save_name="step6_pre_canny_eq_blur_tmp.png",
+                verbose=False
+            )
 
         # —— 6 项解包（论文口径 + 双线性入桶）——
         total, angle_votes, votes_full, theta_axis, rho_max, best_info = hough_angle_voting_min(
@@ -261,12 +281,24 @@ def _adaptive_direction_search_on_frames(
             )
             best["theta_fft"] = theta_fft
             best["sti_filtered"] = filtered_best
-        edges_best = compute_canny_edges(
-            sti_best, use_circular_roi=use_circular_roi,
-            save_name="step7_canny_edges.png",
-            pre_canny_save_name="step6_pre_canny_eq_blur.png",
-            verbose=verbose
-        )
+        if edge_method == "sobel":
+            edges_best = compute_sobel_edges(
+                sti_best,
+                use_highpass=use_sobel_highpass,
+                use_circular_roi=use_circular_roi,
+                roi_radius_frac=roi_radius_frac,
+                save_mag_name="step6_sobel_mag.png",
+                save_edge_name="step7_sobel_edges.png",
+                verbose=verbose,
+            )
+        else:
+            edges_best = compute_canny_edges(
+                sti_best, use_circular_roi=use_circular_roi,
+                roi_radius_frac=roi_radius_frac,
+                save_name="step7_canny_edges.png",
+                pre_canny_save_name="step6_pre_canny_eq_blur.png",
+                verbose=verbose
+            )
 
         total, angle_votes, votes_full, theta_axis, _, _ = hough_angle_voting_min(
             edges_best, theta_res_deg=vote_theta_res_deg, rho_step=1.0, k_ratio=float(vote_k_ratio)
@@ -347,6 +379,9 @@ def adaptive_direction_search(video_path: str,
                               angle_start: float, angle_end: float, angle_step: float,
                               max_frames: int = 300,
                               use_circular_roi: bool = False,
+                              roi_radius_frac: float = 1.0,
+                              edge_method: str = "canny",
+                              use_sobel_highpass: bool = False,
                               use_fft_fan_filter: bool = True,
                               fft_half_width_deg: float = 4.0,
                               fft_rmin_ratio: float = 0.05,
@@ -368,6 +403,9 @@ def adaptive_direction_search(video_path: str,
         angle_end,
         angle_step,
         use_circular_roi=use_circular_roi,
+        roi_radius_frac=roi_radius_frac,
+        edge_method=edge_method,
+        use_sobel_highpass=use_sobel_highpass,
         use_fft_fan_filter=use_fft_fan_filter,
         fft_half_width_deg=fft_half_width_deg,
         fft_rmin_ratio=fft_rmin_ratio,
@@ -436,6 +474,9 @@ def batch_probe_along_line(
     m_per_px: Optional[float],
     fps: Optional[float],
     use_circular_roi: bool,
+    roi_radius_frac: float,
+    edge_method: str,
+    use_sobel_highpass: bool,
     use_fft_fan_filter: bool,
     fft_half_width_deg: float,
     fft_rmin_ratio: float,
@@ -486,6 +527,9 @@ def batch_probe_along_line(
                 angle_end,
                 angle_step,
                 use_circular_roi=use_circular_roi,
+                roi_radius_frac=roi_radius_frac,
+                edge_method=edge_method,
+                use_sobel_highpass=use_sobel_highpass,
                 use_fft_fan_filter=use_fft_fan_filter,
                 fft_half_width_deg=fft_half_width_deg,
                 fft_rmin_ratio=fft_rmin_ratio,
