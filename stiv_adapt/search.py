@@ -281,14 +281,24 @@ def _adaptive_direction_search_on_frames(
             )
             best["theta_fft"] = theta_fft
             best["sti_filtered"] = filtered_best
-        # 最终主方向一律使用 Canny 边缘，再做霍夫计票（与前序测速线选用的边缘方案无关）
-        edges_best = compute_canny_edges(
-            sti_best, use_circular_roi=use_circular_roi,
-            roi_radius_frac=roi_radius_frac,
-            save_name="step7_canny_edges.png",
-            pre_canny_save_name="step6_pre_canny_eq_blur.png",
-            verbose=verbose
-        )
+        if edge_method == "sobel":
+            edges_best = compute_sobel_edges(
+                sti_best,
+                use_highpass=use_sobel_highpass,
+                use_circular_roi=use_circular_roi,
+                roi_radius_frac=roi_radius_frac,
+                save_mag_name="step6_sobel_mag.png",
+                save_edge_name="step7_sobel_edges.png",
+                verbose=verbose,
+            )
+        else:
+            edges_best = compute_canny_edges(
+                sti_best, use_circular_roi=use_circular_roi,
+                roi_radius_frac=roi_radius_frac,
+                save_name="step7_canny_edges.png",
+                pre_canny_save_name="step6_pre_canny_eq_blur.png",
+                verbose=verbose
+            )
 
         total, angle_votes, votes_full, theta_axis, _, _ = hough_angle_voting_min(
             edges_best, theta_res_deg=vote_theta_res_deg, rho_step=1.0, k_ratio=float(vote_k_ratio)
