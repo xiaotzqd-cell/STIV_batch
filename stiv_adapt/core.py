@@ -12,6 +12,8 @@ from contextlib import contextmanager
 import cv2
 import numpy as np
 
+from stiv_adapt.sobel import compute_sobel_edges
+
 if __package__ in (None, ""):
     # 允许直接运行本文件时找到顶层 stiv_adapt 包
     sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
@@ -183,8 +185,20 @@ def _angdiff_deg(a, b):
     d = abs(a - b)
     return min(d, 180.0 - d)
 
+def _circular_roi_mask(shape: tuple[int, int], radius_frac: float = 1.0) -> np.ndarray:
+    """Build a circular ROI mask with configurable radius fraction."""
+
+    H, W = shape
+    radius_frac = float(max(0.0, min(1.0, radius_frac)))
+    cx, cy = W / 2.0, H / 2.0
+    yy, xx = np.indices((H, W))
+    r = radius_frac * min(H, W) / 2.0
+    return ((xx - cx) ** 2 + (yy - cy) ** 2) <= (r * r)
+
+
 def compute_canny_edges(sti_u8: np.ndarray,
                         use_circular_roi: bool = False,
+                        roi_radius_frac: float = 1.0,
                         save_name: str = "step7_canny_edges.png",
                         pre_canny_save_name: Optional[str] = "step6_pre_canny_eq_blur.png",
                         verbose: bool = False) -> np.ndarray:
@@ -198,15 +212,13 @@ def compute_canny_edges(sti_u8: np.ndarray,
     high = int(min(255, 1.33 * v))
     edges = cv2.Canny(blur, low, high, apertureSize=3, L2gradient=True)
     if use_circular_roi:
-        yy, xx = np.indices((H, W))
-        cy, cx = H / 2.0, W / 2.0
-        r = min(H, W) / 2.0
-        mask = ((xx - cx) ** 2 + (yy - cy) ** 2) <= (r * r)
+        mask = _circular_roi_mask((H, W), radius_frac=roi_radius_frac)
         edges = cv2.bitwise_and(edges, edges, mask=mask.astype(np.uint8))
     _save_img(save_name, edges)
     if verbose:
         print(f"[canny] v={v:.2f}, low={low}, high={high}, roi={'circle' if use_circular_roi else 'none'}")
     return edges
+
 
 def hough_voting_angle_and_slope(sti_u8: np.ndarray,
                                  edges: np.ndarray,
