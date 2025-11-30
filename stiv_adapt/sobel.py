@@ -6,7 +6,7 @@ sobel.py — 使用 Sobel 算子计算 STI 边缘/梯度图。
 
 import cv2
 import numpy as np
-from typing import Optional
+from typing import Optional, Tuple, List, Dict
 
 
 def build_J1_grad_mag(img: np.ndarray) -> np.ndarray:
@@ -132,6 +132,72 @@ def hough_angle_score_weighted(J: np.ndarray,
         scores[i] = float(above.sum())
 
     return thetas_deg, scores
+
+
+def hough_angle_voting_weighted(
+    J: np.ndarray,
+    theta_res_deg: float = 1.0,
+    rho_step: float = 1.0,
+    weight_thresh: float = 5.0,
+    use_circular_roi: bool = False,
+    roi_radius_frac: float = 1.0,
+    verbose: bool = False,
+) -> Tuple[float, List[Tuple[float, float]], np.ndarray, np.ndarray, int, Dict[str, float]]:
+    """基于 Sobel 梯度幅值的“灰度加权”角度评分。
+
+    返回与 ``hough_angle_voting_min`` 相同的 6 项元组，便于现有流程复用：
+    ``(total_score, angle_votes, scores_per_theta, theta_axis, rho_max, best_info)``。
+    其中 ``best_info['votes']`` 为最佳角度上的能量和（非整数票数）。
+    """
+
+    if J.ndim != 2:
+        raise ValueError("hough_angle_voting_weighted 仅支持单通道灰度图")
+
+    H, W = J.shape
+    roi_mask = None
+    if use_circular_roi:
+        roi_mask = build_circular_roi_mask(J.shape, radius_frac=roi_radius_frac)
+
+    theta_axis, scores = hough_angle_score_weighted(
+        J,
+        theta_min_deg=0.0,
+        theta_max_deg=180.0,
+        theta_step_deg=float(theta_res_deg),
+        rho_step=float(rho_step),
+        weight_thresh=float(weight_thresh),
+        roi_mask=roi_mask,
+    )
+
+    rho_max = int(np.ceil(np.hypot(W / 2.0, H / 2.0)))
+
+    if scores.size == 0:
+        zero = np.zeros_like(theta_axis, dtype=np.float32)
+        best_info = {"theta_deg": float("nan"), "alpha_deg": float("nan"), "votes": 0.0}
+        return 0.0, [], zero, theta_axis, rho_max, best_info
+
+    best_idx = int(np.argmax(scores))
+    theta_best = float(theta_axis[best_idx])
+    alpha_best = (theta_best + 90.0) % 180.0
+    votes_best = float(scores[best_idx])
+
+    best_info = {"theta_deg": theta_best, "alpha_deg": alpha_best, "votes": votes_best}
+
+    total_score = float(scores.sum())
+    angle_votes = [(float(theta_axis[i]), float(v)) for i, v in enumerate(scores) if v > 0]
+
+    if verbose:
+        rho_bins = int(np.floor((2 * rho_max) / rho_step) + 1)
+        print(
+            f"[RESULT] (H×W)={H}×{W} | theta_res_deg={theta_res_deg} | rho_step={rho_step} | "
+            f"weight_thresh={weight_thresh}"
+        )
+        print(f"[RESULT] ρ_max={rho_max} | ρ_bins={rho_bins}")
+        print(
+            f"[RESULT] φ* (theta_deg)={theta_best:.3f} | α*=φ*+90°={alpha_best:.3f} | "
+            f"energy={votes_best:.1f}"
+        )
+
+    return total_score, angle_votes, scores, theta_axis, rho_max, best_info
 
 
 def _save_img_safe(name: str, img: np.ndarray) -> None:
