@@ -18,6 +18,9 @@ LENGTH_PX = 256
 ANGLE_START, ANGLE_END, ANGLE_STEP = -135, -45, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 256
 USE_ROI = True
+ROI_RADIUS_FRAC = 1.0  # 圆形 ROI 半径占 min(H, W)/2 的比例，范围 (0,1]
+EDGE_METHOD = "canny"  # 可选："canny" / "sobel"
+SOBEL_USE_HIGHPASS = False  # Sobel 是否在计算前做高斯高通
 VERBOSE = True
 
 # 速度阈值设置（m/s），可按需修改；留 None 表示不限制
@@ -352,6 +355,9 @@ def main():
             m_per_px=m_per_px,
             fps=FPS,
             use_circular_roi=USE_ROI,
+            roi_radius_frac=ROI_RADIUS_FRAC,
+            edge_method=EDGE_METHOD,
+            use_sobel_highpass=SOBEL_USE_HIGHPASS,
             use_fft_fan_filter=USE_FFT_FAN,
             fft_half_width_deg=FFT_HALF_DEG,
             fft_rmin_ratio=FFT_RMIN_RATIO,
@@ -383,7 +389,7 @@ def main():
         return
 
 
-    # 自适应方向搜索（内部：构建STI → 可选FFT扇形增强 → Canny → 角度投票霍夫）
+    # 自适应方向搜索（内部：构建STI → 可选FFT扇形增强 → 边缘检测 → 角度投票霍夫）
     best = adaptive_direction_search(
         video_path=VIDEO,
         center=CENTER,
@@ -393,6 +399,9 @@ def main():
         angle_step=ANGLE_STEP,
         max_frames=MAX_FRAMES,
         use_circular_roi=USE_ROI,
+        roi_radius_frac=ROI_RADIUS_FRAC,
+        edge_method=EDGE_METHOD,
+        use_sobel_highpass=SOBEL_USE_HIGHPASS,
         use_fft_fan_filter=USE_FFT_FAN,
         fft_half_width_deg=FFT_HALF_DEG,
         fft_rmin_ratio=FFT_RMIN_RATIO,
