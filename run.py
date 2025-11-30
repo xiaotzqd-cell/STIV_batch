@@ -18,7 +18,12 @@ LENGTH_PX = 256
 ANGLE_START, ANGLE_END, ANGLE_STEP = -90,-89,1#-135, -45, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 256
 USE_ROI = True
+ROI_RADIUS_FRAC: float = 1.0  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
 VERBOSE = True
+
+# 边缘提取方式：可选 "canny" 或 "sobel"
+EDGE_METHOD: str = "canny"
+USE_SOBEL_HIGHPASS: bool = False  # True 表示使用高通+Sobel 梯度幅值
 
 # 速度阈值设置（m/s），可按需修改；留 None 表示不限制
 V_MIN: Optional[float] = 0.5
@@ -352,6 +357,9 @@ def main():
             m_per_px=m_per_px,
             fps=FPS,
             use_circular_roi=USE_ROI,
+            roi_radius_frac=ROI_RADIUS_FRAC,
+            edge_method=EDGE_METHOD,
+            use_sobel_highpass=USE_SOBEL_HIGHPASS,
             use_fft_fan_filter=USE_FFT_FAN,
             fft_half_width_deg=FFT_HALF_DEG,
             fft_rmin_ratio=FFT_RMIN_RATIO,
@@ -393,6 +401,9 @@ def main():
         angle_step=ANGLE_STEP,
         max_frames=MAX_FRAMES,
         use_circular_roi=USE_ROI,
+        roi_radius_frac=ROI_RADIUS_FRAC,
+        edge_method=EDGE_METHOD,
+        use_sobel_highpass=USE_SOBEL_HIGHPASS,
         use_fft_fan_filter=USE_FFT_FAN,
         fft_half_width_deg=FFT_HALF_DEG,
         fft_rmin_ratio=FFT_RMIN_RATIO,
