@@ -397,7 +397,7 @@ def _calculate_extended_line(center: Tuple[int, int],
     if half_length == 0:
         return [center]
 
-    ux = dx / half_length
+    ux = dx / half_length  #方向单位化u=(ux,uy)
     uy = dy / half_length
     # 岸边点关于中心点的对称点，定义测速范围的另一端
     another_bank_point = (2 * cx - bx, 2 * cy - by)
@@ -417,10 +417,10 @@ def _calculate_extended_line(center: Tuple[int, int],
             dist += interval_px
 
     # 确保两端点被纳入（若落在画面内）
-    for endpoint in (bank_point, another_bank_point):
-        ex, ey = endpoint
-        if 0 <= ex < w and 0 <= ey < h and endpoint not in points:
-            points.append(endpoint)
+    # for endpoint in (bank_point, another_bank_point):
+    #     ex, ey = endpoint
+    #     if 0 <= ex < w and 0 <= ey < h and endpoint not in points:
+    #         points.append(endpoint)
 
     return points
 
