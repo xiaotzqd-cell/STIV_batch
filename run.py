@@ -7,7 +7,7 @@ from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 # ========== 用户配置区（按需修改） ==========
 VIDEO = r"D:\Programs\Python\stiv1\CRR.MP4"
-CENTER: Tuple[int, int] =(1987, 570)#(1870, 1117)  # ← 手动中心点（像素坐标）
+CENTER: Tuple[int, int] =(1787,571)#(1987, 570) # ← 手动中心点（像素坐标）
 
 #多点测速参数
 USE_BATCH_LINE_PROBING = True # ← 开启多点测速
@@ -15,10 +15,10 @@ BANK_POINT: Tuple[int, int] = (783, 577)#(533, 1120) # 岸边点（与 CENTER �
 PROBE_INTERVAL_PX = 200 # 两测点之间的像素间隔（从中心点向两端延伸）
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 256
-ANGLE_START, ANGLE_END, ANGLE_STEP =-135, -45, 1   # 遍历的“测速线角度”
+ANGLE_START, ANGLE_END, ANGLE_STEP =-110, -70, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 256
 USE_ROI = True
-ROI_RADIUS_FRAC: float = 1.0  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
+ROI_RADIUS_FRAC: float = 0.9  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
 VERBOSE = True
 
 # 边缘提取方式：可选 "canny" 或 "sobel"
@@ -41,7 +41,7 @@ SCALE_M_PER_PIXEL: Optional[float] = None  # A) 直接给（m/px）；不想手�
 CALIB_REAL_M: Optional[float] = 49.38      # B) 首帧两点标定（米）
 CALIB_LINE_XYXY: Optional[Tuple[int, int, int, int]] = (445, 1321, 3085, 1444)
 #投票霍夫的可调参数（法线角 θ 的设置）——
-VOTE_THETA_RES_DEG = 0.1                 # 角度分辨率（度）
+VOTE_THETA_RES_DEG = 1                 # 角度分辨率（度）
 VOTE_K_RATIO: float = 0.55             # 用比例阈值 K=0.55*R
 VOTE_THETA_RANGE = (0.0, 180.0)        # 有效法线角范围 [min, max)
 # ==========================================
