@@ -487,11 +487,12 @@ def adaptive_direction_search(video_path: str,
                               fft_half_width_deg: float = 4.0,
                               fft_rmin_ratio: float = 0.05,
                               fft_rmax_ratio: float = 1.0,
-                              verbose: bool = False,
-                              use_E_asym: bool = False,
                               vote_theta_res_deg: float = 0.5,
                               vote_k_ratio: float = 0.55,
                               vote_theta_range: Tuple[float, float] = (0.0, 180.0),
+                              verbose: bool = False,
+                              *,
+                              use_E_asym: bool = False,
                               save_candidate_overlays: bool = False
                               ) -> Dict[str, Any]:
     frames, fps = _load_video_frames(video_path, max_frames)
@@ -588,6 +589,8 @@ def batch_probe_along_line(
     vote_k_ratio: float,
     vote_theta_range: Tuple[float, float],
     verbose: bool,
+    *,
+    use_E_asym: bool,
 ) -> List[Dict[str, Any]]:
     """沿着给定直线执行多点测速。"""
 
@@ -638,6 +641,7 @@ def batch_probe_along_line(
                 fft_rmin_ratio=fft_rmin_ratio,
                 fft_rmax_ratio=fft_rmax_ratio,
                 verbose=verbose,
+                use_E_asym=use_E_asym,
                 vote_theta_res_deg=vote_theta_res_deg,
                 vote_k_ratio=vote_k_ratio,
                 vote_theta_range=vote_theta_range,
