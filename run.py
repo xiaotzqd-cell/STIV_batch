@@ -17,7 +17,7 @@ PROBE_INTERVAL_PX = 200 # 两测点之间的像素间隔（从中心点向两端
 
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 256
-ANGLE_START, ANGLE_END, ANGLE_STEP =-135, -45, 1   # 遍历的“测速线角度”
+ANGLE_START, ANGLE_END, ANGLE_STEP =-135, -45, 0.1   # 遍历的“测速线角度”
 MAX_FRAMES = 256
 USE_ROI = True
 ROI_RADIUS_FRAC: float = 0.9  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
