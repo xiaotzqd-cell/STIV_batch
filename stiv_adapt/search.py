@@ -259,7 +259,7 @@ def _adaptive_direction_search_on_frames(
             r = min(W / 2.0, H / 2.0)
             K_here = int(max(1, round(float(vote_k_ratio) * r)))
             rho_bins = int(np.floor((2 * rho_max) / 1.0) + 1)
-            probe_rows.append({
+            row = {
                 "probe_angle_deg": float(a),
                 "phi_star_deg": float("nan"),
                 "alpha_star_deg": float("nan"),
@@ -267,7 +267,10 @@ def _adaptive_direction_search_on_frames(
                 "rho_max": int(rho_max),
                 "rho_bins": int(rho_bins),
                 "K": int(K_here),
-            })
+            }
+            if use_E_asym:
+                row["E_asym"] = float("nan")
+            probe_rows.append(row)
             #
             angle_times.append({"angle": float(a), "seconds": float(time.perf_counter() - t0)})
             a += angle_step;continue
@@ -279,9 +282,7 @@ def _adaptive_direction_search_on_frames(
         tan_a = math.tan(math.radians(alpha_deg))
         slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
 
-        E_asym = float("nan")
-        if use_E_asym:
-            E_asym = _compute_symmetry_score(votes_filtered, peak_idx)
+        E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
 
         #
         # —— 记录/打印本角度的 ρ 参数与得分 —— #
@@ -290,7 +291,7 @@ def _adaptive_direction_search_on_frames(
         K_here = int(max(1, round(float(vote_k_ratio) * r)))
         rho_bins = int(np.floor((2 * rho_max) / 1.0) + 1)
 
-        probe_rows.append({
+        row = {
             "probe_angle_deg": float(a),
             "phi_star_deg": float(theta_normal_deg),
             "alpha_star_deg": float(alpha_deg),
@@ -298,8 +299,10 @@ def _adaptive_direction_search_on_frames(
             "rho_max": int(rho_max),
             "rho_bins": int(rho_bins),
             "K": int(K_here),
-            "E_asym": float(E_asym),
-        })
+        }
+        if use_E_asym:
+            row["E_asym"] = float(E_asym)
+        probe_rows.append(row)
 
         # 也在控制台打一行，便于你现场看
         score_txt = f"{peak_votes:.1f}" if edge_method == "sobel" else f"{int(round(peak_votes))}"
@@ -316,13 +319,15 @@ def _adaptive_direction_search_on_frames(
 
         angle_times.append({"angle": float(a), "seconds": float(time.perf_counter() - t0)})
 
-        candidates.append({
+        cand = {
             "angle": alpha_deg,
             "slope": slope,
             "score": peak_votes,
             "angle_probe": a,
-            "E_asym": float(E_asym),
-        })
+        }
+        if use_E_asym:
+            cand["E_asym"] = float(E_asym)
+        candidates.append(cand)
 
         if peak_votes > best["score"]:
             best.update(dict(
@@ -409,14 +414,13 @@ def _adaptive_direction_search_on_frames(
             tan_a = math.tan(math.radians(alpha_deg))
             slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
 
-            E_asym = best.get("E_asym", float("nan"))
-            if use_E_asym:
-                E_asym = _compute_symmetry_score(votes_filtered, peak_idx)
+            E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
 
             best["angle"] = alpha_deg
             best["slope"] = slope
             best["score"] = peak_votes
-            best["E_asym"] = E_asym
+            if use_E_asym:
+                best["E_asym"] = E_asym
 
             # 叠加图像（本地函数，不再依赖 core 导入）
             _draw_line_overlay(sti_best, alpha_deg=alpha_deg, theta_normal_deg=theta_normal_deg,
@@ -445,7 +449,9 @@ def _adaptive_direction_search_on_frames(
     # 写 CSV
     try:
         fieldnames = ["probe_angle_deg", "phi_star_deg", "alpha_star_deg",
-                      "score_lines", "rho_max", "rho_bins", "K", "E_asym"]
+                      "score_lines", "rho_max", "rho_bins", "K"]
+        if use_E_asym:
+            fieldnames.append("E_asym")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -678,6 +684,8 @@ def batch_probe_along_line(
             "length_px": length_px,
             "score": best.get("score"),
         }
+        if use_E_asym:
+            result_row["E_asym"] = best.get("E_asym")
         results.append(result_row)
 
         if verbose:
