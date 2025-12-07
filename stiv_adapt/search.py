@@ -32,6 +32,43 @@ def _apply_theta_filters_on_votes(votes_full: np.ndarray,
     return vf
 
 
+def _compute_symmetry_score(scores: np.ndarray, best_idx: int) -> float:
+    """依据峰值左右半峰范围的对称性计算 E_asym。"""
+
+    if scores.ndim != 1 or scores.size == 0:
+        return float("nan")
+    if best_idx < 0 or best_idx >= scores.size:
+        return float("nan")
+
+    best_score = float(scores[best_idx])
+    half_score = 0.5 * best_score
+
+    left_idx = best_idx
+    while left_idx > 0 and scores[left_idx] > half_score:
+        left_idx -= 1
+
+    right_idx = best_idx
+    last = scores.size - 1
+    while right_idx < last and scores[right_idx] > half_score:
+        right_idx += 1
+
+    span_left = best_idx - left_idx
+    span_right = right_idx - best_idx
+    span = int(min(span_left, span_right))
+
+    if span >= 1:
+        num = 0.0
+        den = 0.0
+        for k in range(1, span + 1):
+            s_left = float(scores[best_idx - k])
+            s_right = float(scores[best_idx + k])
+            num += abs(s_left - s_right)
+            den += (s_left + s_right)
+        return num / den if den > 0.0 else 0.0
+
+    return float("nan")
+
+
 def _draw_line_overlay(sti_u8: np.ndarray,
                        alpha_deg: float,
                        theta_normal_deg: float,
@@ -128,12 +165,14 @@ def _adaptive_direction_search_on_frames(
     fft_rmin_ratio: float,
     fft_rmax_ratio: float,
     verbose: bool,
+    use_E_asym: bool,
     vote_theta_res_deg: float,
     vote_k_ratio: float,
     vote_theta_range: Tuple[float, float],
     save_candidate_overlays: bool,
 ) -> Dict[str, Any]:
     probe_rows: List[Dict[str, Any]] = []
+    candidates: List[Dict[str, Any]] = []
     t_total0 = time.perf_counter()
     angle_times: List[Dict[str, float]] = []
 
@@ -146,6 +185,7 @@ def _adaptive_direction_search_on_frames(
         "sti_filtered": None,
         "fps": fps,
         "angle_probe": None,
+        "E_asym": float("nan"),
     }
 
     edge_method = (edge_method or "canny").lower()
@@ -239,6 +279,10 @@ def _adaptive_direction_search_on_frames(
         tan_a = math.tan(math.radians(alpha_deg))
         slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
 
+        E_asym = float("nan")
+        if use_E_asym:
+            E_asym = _compute_symmetry_score(votes_filtered, peak_idx)
+
         #
         # —— 记录/打印本角度的 ρ 参数与得分 —— #
         H, W = edges.shape[:2]
@@ -254,6 +298,7 @@ def _adaptive_direction_search_on_frames(
             "rho_max": int(rho_max),
             "rho_bins": int(rho_bins),
             "K": int(K_here),
+            "E_asym": float(E_asym),
         })
 
         # 也在控制台打一行，便于你现场看
@@ -271,12 +316,39 @@ def _adaptive_direction_search_on_frames(
 
         angle_times.append({"angle": float(a), "seconds": float(time.perf_counter() - t0)})
 
+        candidates.append({
+            "angle": alpha_deg,
+            "slope": slope,
+            "score": peak_votes,
+            "angle_probe": a,
+            "E_asym": float(E_asym),
+        })
+
         if peak_votes > best["score"]:
             best.update(dict(
                 angle=alpha_deg, slope=slope, score=peak_votes,
                 theta_fft=theta_fft, sti_raw=sti, angle_probe=a
             ))
         a += angle_step
+
+    if candidates:
+        top_candidates = sorted(candidates, key=lambda d: (-d["score"], d["angle_probe"]))[:10]
+        if use_E_asym:
+            def _asym_key(c: Dict[str, Any]):
+                asym = c.get("E_asym", float("nan"))
+                return (math.inf if math.isnan(asym) else asym, -c["score"], c["angle_probe"])
+
+            chosen = min(top_candidates, key=_asym_key)
+        else:
+            chosen = top_candidates[0]
+
+        best.update(
+            angle=chosen.get("angle"),
+            slope=chosen.get("slope"),
+            score=chosen.get("score", -1.0),
+            angle_probe=chosen.get("angle_probe"),
+            E_asym=chosen.get("E_asym", float("nan")),
+        )
 
     # —— 用最佳角度再落盘一次 —— #
     if best["angle"] is not None:
@@ -337,9 +409,14 @@ def _adaptive_direction_search_on_frames(
             tan_a = math.tan(math.radians(alpha_deg))
             slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
 
+            E_asym = best.get("E_asym", float("nan"))
+            if use_E_asym:
+                E_asym = _compute_symmetry_score(votes_filtered, peak_idx)
+
             best["angle"] = alpha_deg
             best["slope"] = slope
             best["score"] = peak_votes
+            best["E_asym"] = E_asym
 
             # 叠加图像（本地函数，不再依赖 core 导入）
             _draw_line_overlay(sti_best, alpha_deg=alpha_deg, theta_normal_deg=theta_normal_deg,
@@ -368,7 +445,7 @@ def _adaptive_direction_search_on_frames(
     # 写 CSV
     try:
         fieldnames = ["probe_angle_deg", "phi_star_deg", "alpha_star_deg",
-                      "score_lines", "rho_max", "rho_bins", "K"]
+                      "score_lines", "rho_max", "rho_bins", "K", "E_asym"]
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -411,6 +488,7 @@ def adaptive_direction_search(video_path: str,
                               fft_rmin_ratio: float = 0.05,
                               fft_rmax_ratio: float = 1.0,
                               verbose: bool = False,
+                              use_E_asym: bool = False,
                               vote_theta_res_deg: float = 0.5,
                               vote_k_ratio: float = 0.55,
                               vote_theta_range: Tuple[float, float] = (0.0, 180.0),
@@ -435,6 +513,7 @@ def adaptive_direction_search(video_path: str,
         fft_rmin_ratio=fft_rmin_ratio,
         fft_rmax_ratio=fft_rmax_ratio,
         verbose=verbose,
+        use_E_asym=use_E_asym,
         vote_theta_res_deg=vote_theta_res_deg,
         vote_k_ratio=vote_k_ratio,
         vote_theta_range=vote_theta_range,

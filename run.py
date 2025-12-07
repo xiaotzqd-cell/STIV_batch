@@ -36,6 +36,8 @@ FFT_RMIN_RATIO = 0.15
 FFT_RMAX_RATIO = 0.9
 # 帧率（建议手动给准值；留 None 则使用视频元数据）
 FPS: Optional[float] = 23.976
+# 对称性评分开关：True 时使用 E_asym 二次筛选最佳角度
+USE_E_ASYM: bool = False
 # 比例尺：二选一
 SCALE_M_PER_PIXEL: Optional[float] = None  # A) 直接给（m/px）；不想手填则设 None 走 B)
 CALIB_REAL_M: Optional[float] = 49.38      # B) 首帧两点标定（米）
@@ -364,6 +366,7 @@ def main():
             fft_half_width_deg=FFT_HALF_DEG,
             fft_rmin_ratio=FFT_RMIN_RATIO,
             fft_rmax_ratio=FFT_RMAX_RATIO,
+            use_E_asym=USE_E_ASYM,
             vote_theta_res_deg=VOTE_THETA_RES_DEG,
             vote_k_ratio=VOTE_K_RATIO,
             vote_theta_range=VOTE_THETA_RANGE,
@@ -409,6 +412,7 @@ def main():
         fft_rmin_ratio=FFT_RMIN_RATIO,
         fft_rmax_ratio=FFT_RMAX_RATIO,
         verbose=VERBOSE,
+        use_E_asym=USE_E_ASYM,
         # —— 将 run 的可调参数传入 search —— #
         vote_theta_res_deg=VOTE_THETA_RES_DEG,
         vote_k_ratio=VOTE_K_RATIO,
