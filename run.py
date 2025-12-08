@@ -25,6 +25,8 @@ VERBOSE = True
 
 # 对称性评分开关：True 时使用 E_asym 二次筛选最佳角度
 USE_E_ASYM: bool = True
+# 单调性评分开关：True 时启用 M_mono 判据（优先于对称性）
+USE_M_MONO: bool = True
 
 # 边缘提取方式：可选 "canny" 或 "sobel"
 EDGE_METHOD: str = "sobel"
@@ -371,6 +373,7 @@ def main():
             fft_rmin_ratio=FFT_RMIN_RATIO,
             fft_rmax_ratio=FFT_RMAX_RATIO,
             use_E_asym=USE_E_ASYM,
+            use_M_mono=USE_M_MONO,
             vote_theta_res_deg=VOTE_THETA_RES_DEG,
             vote_k_ratio=VOTE_K_RATIO,
             vote_theta_range=VOTE_THETA_RANGE,
@@ -417,6 +420,7 @@ def main():
         fft_rmax_ratio=FFT_RMAX_RATIO,
         verbose=VERBOSE,
         use_E_asym=USE_E_ASYM,
+        use_M_mono=USE_M_MONO,
         # —— 将 run 的可调参数传入 search —— #
         vote_theta_res_deg=VOTE_THETA_RES_DEG,
         vote_k_ratio=VOTE_K_RATIO,
@@ -459,6 +463,10 @@ def main():
 
     print(f"Hough 得分(交线频率): {best['score']:.1f}")
     print(f"STI 斜率 slope (px/frame): {best['slope'] if best['slope'] is not None else 'None'}")
+    if USE_M_MONO:
+        print(f"M_mono 单调性评分: {best.get('M_mono')}")
+    if USE_E_ASYM:
+        print(f"E_asym 对称性评分: {best.get('E_asym')}")
 
     if m_per_px is not None and best["slope"] is not None and best.get("fps"):
         v_mps = best["slope"] * m_per_px * best["fps"]
