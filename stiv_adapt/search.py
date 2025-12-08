@@ -69,6 +69,60 @@ def _compute_symmetry_score(scores: np.ndarray, best_idx: int) -> float:
     return float("nan")
 
 
+def _compute_monotonicity_score(scores: np.ndarray, best_idx: int) -> float:
+    """依据峰值左右半峰范围的单调性计算 M_mono。
+
+    逻辑：
+    1) 以 half_score = 0.5 * peak 为界，分别找到左右半峰边界索引；
+    2) 取 span=min(左跨度, 右跨度)，表示在半峰区间内可以向两侧走的步数；
+    3) 从峰顶向左右各走 span 步，理想情况应当单调不增；
+       若出现“当前值比前一值更大”，视为一次违例；
+    4) N_step = 2*span，M_mono = 1 - N_violate/N_step。
+    """
+
+    if scores.ndim != 1 or scores.size == 0:
+        return float("nan")
+    if best_idx < 0 or best_idx >= scores.size:
+        return float("nan")
+
+    best_score = float(scores[best_idx])
+    half_score = 0.5 * best_score
+
+    left_idx = best_idx
+    while left_idx > 0 and scores[left_idx] > half_score:
+        left_idx -= 1
+
+    right_idx = best_idx
+    last = scores.size - 1
+    while right_idx < last and scores[right_idx] > half_score:
+        right_idx += 1
+
+    span_left = best_idx - left_idx
+    span_right = right_idx - best_idx
+    span = int(min(span_left, span_right))
+
+    if span < 1:
+        return float("nan")
+
+    N_step = 2 * span
+    N_violate = 0
+    eps = 0.0
+
+    for k in range(1, span + 1):
+        prev_val = float(scores[best_idx - (k - 1)])
+        curr_val = float(scores[best_idx - k])
+        if curr_val > prev_val + eps:
+            N_violate += 1
+
+    for k in range(1, span + 1):
+        prev_val = float(scores[best_idx + (k - 1)])
+        curr_val = float(scores[best_idx + k])
+        if curr_val > prev_val + eps:
+            N_violate += 1
+
+    return 1.0 - (N_violate / float(N_step))
+
+
 def _draw_line_overlay(sti_u8: np.ndarray,
                        alpha_deg: float,
                        theta_normal_deg: float,
@@ -166,6 +220,7 @@ def _adaptive_direction_search_on_frames(
     fft_rmax_ratio: float,
     verbose: bool,
     use_E_asym: bool,
+    use_M_mono: bool,
     vote_theta_res_deg: float,
     vote_k_ratio: float,
     vote_theta_range: Tuple[float, float],
@@ -186,6 +241,7 @@ def _adaptive_direction_search_on_frames(
         "fps": fps,
         "angle_probe": None,
         "E_asym": float("nan"),
+        "M_mono": float("nan"),
     }
 
     edge_method = (edge_method or "canny").lower()
@@ -270,6 +326,8 @@ def _adaptive_direction_search_on_frames(
             }
             if use_E_asym:
                 row["E_asym"] = float("nan")
+            if use_M_mono:
+                row["M_mono"] = float("nan")
             probe_rows.append(row)
             #
             angle_times.append({"angle": float(a), "seconds": float(time.perf_counter() - t0)})
@@ -283,6 +341,7 @@ def _adaptive_direction_search_on_frames(
         slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
 
         E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
+        M_mono = _compute_monotonicity_score(votes_filtered, peak_idx) if use_M_mono else float("nan")
 
         #
         # —— 记录/打印本角度的 ρ 参数与得分 —— #
@@ -302,6 +361,8 @@ def _adaptive_direction_search_on_frames(
         }
         if use_E_asym:
             row["E_asym"] = float(E_asym)
+        if use_M_mono:
+            row["M_mono"] = float(M_mono)
         probe_rows.append(row)
 
         # 也在控制台打一行，便于你现场看
@@ -327,18 +388,28 @@ def _adaptive_direction_search_on_frames(
         }
         if use_E_asym:
             cand["E_asym"] = float(E_asym)
+        if use_M_mono:
+            cand["M_mono"] = float(M_mono)
         candidates.append(cand)
 
         if peak_votes > best["score"]:
             best.update(dict(
                 angle=alpha_deg, slope=slope, score=peak_votes,
-                theta_fft=theta_fft, sti_raw=sti, angle_probe=a
+                theta_fft=theta_fft, sti_raw=sti, angle_probe=a,
+                E_asym=E_asym, M_mono=M_mono,
             ))
         a += angle_step
 
     if candidates:
         top_candidates = sorted(candidates, key=lambda d: (-d["score"], d["angle_probe"]))[:10]
-        if use_E_asym:
+        if use_M_mono:
+            def _mono_key(c: Dict[str, Any]):
+                mono = c.get("M_mono", float("nan"))
+                mono_val = -math.inf if math.isnan(mono) else mono
+                return (mono_val, c["score"], -c["angle_probe"])
+
+            chosen = max(top_candidates, key=_mono_key)
+        elif use_E_asym:
             def _asym_key(c: Dict[str, Any]):
                 asym = c.get("E_asym", float("nan"))
                 return (math.inf if math.isnan(asym) else asym, -c["score"], c["angle_probe"])
@@ -353,6 +424,7 @@ def _adaptive_direction_search_on_frames(
             score=chosen.get("score", -1.0),
             angle_probe=chosen.get("angle_probe"),
             E_asym=chosen.get("E_asym", float("nan")),
+            M_mono=chosen.get("M_mono", float("nan")),
         )
 
     # —— 用最佳角度再落盘一次 —— #
@@ -415,12 +487,15 @@ def _adaptive_direction_search_on_frames(
             slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
 
             E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
+            M_mono = _compute_monotonicity_score(votes_filtered, peak_idx) if use_M_mono else float("nan")
 
             best["angle"] = alpha_deg
             best["slope"] = slope
             best["score"] = peak_votes
             if use_E_asym:
                 best["E_asym"] = E_asym
+            if use_M_mono:
+                best["M_mono"] = M_mono
 
             # 叠加图像（本地函数，不再依赖 core 导入）
             _draw_line_overlay(sti_best, alpha_deg=alpha_deg, theta_normal_deg=theta_normal_deg,
@@ -452,6 +527,8 @@ def _adaptive_direction_search_on_frames(
                       "score_lines", "rho_max", "rho_bins", "K"]
         if use_E_asym:
             fieldnames.append("E_asym")
+        if use_M_mono:
+            fieldnames.append("M_mono")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -464,17 +541,17 @@ def _adaptive_direction_search_on_frames(
             print(f"[angles.csv] 保存失败: {e}")
 
     # 也打印一个简短汇总（前若干项）
-        if verbose and len(probe_rows) > 0:
-            top = sorted(probe_rows, key=lambda d: (-d["score_lines"], d["probe_angle_deg"]))[:10]
-            print("[angles] Top-10 by score_lines:")
-            for r0 in top:
-                score_val = r0["score_lines"]
-                score_fmt = f"{score_val:.1f}" if edge_method == "sobel" else f"{int(round(score_val))}"
-                print(
-                    f"  a={r0['probe_angle_deg']:+06.1f}° | score={score_fmt:>7} | "
-                    f"φ*={r0['phi_star_deg']:6.1f}° | ρ_max={r0['rho_max']:3d} | "
-                    f"ρ_bins={r0['rho_bins']:3d} | K={r0['K']}"
-                )
+    if verbose and len(probe_rows) > 0:
+        top = sorted(probe_rows, key=lambda d: (-d["score_lines"], d["probe_angle_deg"]))[:10]
+        print("[angles] Top-10 by score_lines:")
+        for r0 in top:
+            score_val = r0["score_lines"]
+            score_fmt = f"{score_val:.1f}" if edge_method == "sobel" else f"{int(round(score_val))}"
+            print(
+                f"  a={r0['probe_angle_deg']:+06.1f}° | score={score_fmt:>7} | "
+                f"φ*={r0['phi_star_deg']:6.1f}° | ρ_max={r0['rho_max']:3d} | "
+                f"ρ_bins={r0['rho_bins']:3d} | K={r0['K']}"
+            )
 
     #
     return best
@@ -499,6 +576,7 @@ def adaptive_direction_search(video_path: str,
                               verbose: bool = False,
                               *,
                               use_E_asym: bool = False,
+                              use_M_mono: bool = False,
                               save_candidate_overlays: bool = False
                               ) -> Dict[str, Any]:
     frames, fps = _load_video_frames(video_path, max_frames)
@@ -521,6 +599,7 @@ def adaptive_direction_search(video_path: str,
         fft_rmax_ratio=fft_rmax_ratio,
         verbose=verbose,
         use_E_asym=use_E_asym,
+        use_M_mono=use_M_mono,
         vote_theta_res_deg=vote_theta_res_deg,
         vote_k_ratio=vote_k_ratio,
         vote_theta_range=vote_theta_range,
@@ -597,6 +676,7 @@ def batch_probe_along_line(
     verbose: bool,
     *,
     use_E_asym: bool,
+    use_M_mono: bool,
 ) -> List[Dict[str, Any]]:
     """沿着给定直线执行多点测速。"""
 
@@ -648,6 +728,7 @@ def batch_probe_along_line(
                 fft_rmax_ratio=fft_rmax_ratio,
                 verbose=verbose,
                 use_E_asym=use_E_asym,
+                use_M_mono=use_M_mono,
                 vote_theta_res_deg=vote_theta_res_deg,
                 vote_k_ratio=vote_k_ratio,
                 vote_theta_range=vote_theta_range,
@@ -686,11 +767,14 @@ def batch_probe_along_line(
         }
         if use_E_asym:
             result_row["E_asym"] = best.get("E_asym")
+        if use_M_mono:
+            result_row["M_mono"] = best.get("M_mono")
         results.append(result_row)
 
         if verbose:
             speed_txt = "N/A" if speed_m_per_s is None else f"{speed_m_per_s:.4f}"
-            print(f"[batch] point#{idx:02d} {point} | length={length_px}px | speed={speed_txt} m/s")
+            mono_txt = "" if not use_M_mono else f" | M_mono={best.get('M_mono')}"
+            print(f"[batch] point#{idx:02d} {point} | length={length_px}px | speed={speed_txt} m/s{mono_txt}")
 
     try:
         df = pd.DataFrame(results)
