@@ -139,6 +139,7 @@ def hough_angle_voting_weighted(
     theta_res_deg: float = 1.0,
     rho_step: float = 1.0,
     weight_thresh: float = 5.0,
+    weight_max: float = 255,
     use_circular_roi: bool = False,
     roi_radius_frac: float = 1.0,
     verbose: bool = False,
