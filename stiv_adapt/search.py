@@ -16,7 +16,12 @@ from .core import (
     DEBUG_RUN_DIR,
     _save_img,
 )
-from .sobel import compute_sobel_edges, hough_angle_voting_weighted
+from .sobel import (
+    compute_sobel_edges,
+    hough_angle_voting_weighted,
+    DEFAULT_WEIGHT_MIN,
+    DEFAULT_WEIGHT_MAX,
+)
 from .vote_accumulator import hough_angle_voting_min
 
 vote_rho_step = 1
@@ -279,7 +284,8 @@ def _adaptive_direction_search_on_frames(
                 edges,
                 theta_res_deg=vote_theta_res_deg,
                 rho_step=vote_rho_step,
-                weight_thresh=5.0,
+                weight_min=DEFAULT_WEIGHT_MIN,
+                weight_max=DEFAULT_WEIGHT_MAX,
                 use_circular_roi=use_circular_roi,
                 roi_radius_frac=roi_radius_frac,
                 verbose=False,
@@ -454,7 +460,8 @@ def _adaptive_direction_search_on_frames(
                 edges_best,
                 theta_res_deg=vote_theta_res_deg,
                 rho_step=vote_rho_step,
-                weight_thresh=5.0,
+                weight_min=DEFAULT_WEIGHT_MIN,
+                weight_max=DEFAULT_WEIGHT_MAX,
                 use_circular_roi=use_circular_roi,
                 roi_radius_frac=roi_radius_frac,
                 verbose=False,

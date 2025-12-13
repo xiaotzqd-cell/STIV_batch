@@ -8,6 +8,10 @@ import cv2
 import numpy as np
 from typing import Optional, Tuple, List, Dict
 
+# 亮度阈值默认值：集中放在顶部，便于统一调整
+DEFAULT_WEIGHT_MIN: float = 5.0
+DEFAULT_WEIGHT_MAX: float = 255.0
+
 
 def build_J1_grad_mag(img: np.ndarray) -> np.ndarray:
     """方法1：直接使用梯度幅值 J = |∇I|。"""
@@ -65,7 +69,8 @@ def hough_angle_score_weighted(J: np.ndarray,
                                theta_max_deg: float = 180.0,
                                theta_step_deg: float = 1.0,
                                rho_step: float = 1.0,
-                               weight_thresh: float = 5.0,
+                               weight_min: float = DEFAULT_WEIGHT_MIN,
+                               weight_max: float = DEFAULT_WEIGHT_MAX,
                                roi_mask: Optional[np.ndarray] = None
                                ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -74,7 +79,8 @@ def hough_angle_score_weighted(J: np.ndarray,
     """
     H, W = J.shape
 
-    base_mask = J.astype(np.float32) > weight_thresh
+    J_float = J.astype(np.float32)
+    base_mask = (J_float >= weight_min) & (J_float <= weight_max)
     if roi_mask is not None:
         base_mask = base_mask & roi_mask
 
@@ -138,8 +144,8 @@ def hough_angle_voting_weighted(
     J: np.ndarray,
     theta_res_deg: float = 1.0,
     rho_step: float = 1.0,
-    weight_thresh: float = 5.0,
-    weight_max: float = 255,
+    weight_min: float = DEFAULT_WEIGHT_MIN,
+    weight_max: float = DEFAULT_WEIGHT_MAX,
     use_circular_roi: bool = False,
     roi_radius_frac: float = 1.0,
     verbose: bool = False,
@@ -165,7 +171,8 @@ def hough_angle_voting_weighted(
         theta_max_deg=180.0,
         theta_step_deg=float(theta_res_deg),
         rho_step=float(rho_step),
-        weight_thresh=float(weight_thresh),
+        weight_min=float(weight_min),
+        weight_max=float(weight_max),
         roi_mask=roi_mask,
     )
 
@@ -190,7 +197,7 @@ def hough_angle_voting_weighted(
         rho_bins = int(np.floor((2 * rho_max) / rho_step) + 1)
         print(
             f"[RESULT] (H×W)={H}×{W} | theta_res_deg={theta_res_deg} | rho_step={rho_step} | "
-            f"weight_thresh={weight_thresh}"
+            f"weight_min={weight_min} | weight_max={weight_max}"
         )
         print(f"[RESULT] ρ_max={rho_max} | ρ_bins={rho_bins}")
         print(
