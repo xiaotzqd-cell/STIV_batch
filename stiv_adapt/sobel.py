@@ -10,7 +10,7 @@ from typing import Optional, Tuple, List, Dict
 
 # 亮度阈值默认值：集中放在顶部，便于统一调整
 DEFAULT_WEIGHT_MIN: float = 5.0
-DEFAULT_WEIGHT_MAX: float = 255.0
+DEFAULT_WEIGHT_MAX: float  = 255
 
 
 def build_J1_grad_mag(img: np.ndarray) -> np.ndarray:
