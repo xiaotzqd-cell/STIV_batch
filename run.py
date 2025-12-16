@@ -29,6 +29,10 @@ VERBOSE = True
 USE_E_ASYM: bool = False
 # 单调性评分开关：True 时启用 M_mono 判据（优先于对称性）
 USE_M_MONO: bool = True
+# M_mono 单调性评分的峰值阈值比例（0~1）：越高越靠近峰顶
+M_MONO_PEAK_RATIO: float = 0.5
+# 角度候选的得分截取数量（默认取前10名）
+TOP_K_CANDIDATES: int = 10
 
 # 边缘提取方式：可选 "canny" 或 "sobel"
 EDGE_METHOD: str = "sobel"
@@ -376,9 +380,11 @@ def main():
             fft_rmax_ratio=FFT_RMAX_RATIO,
             use_E_asym=USE_E_ASYM,
             use_M_mono=USE_M_MONO,
+            m_mono_peak_ratio=M_MONO_PEAK_RATIO,
             vote_theta_res_deg=VOTE_THETA_RES_DEG,
             vote_k_ratio=VOTE_K_RATIO,
             vote_theta_range=VOTE_THETA_RANGE,
+            top_k_candidates=TOP_K_CANDIDATES,
             verbose=VERBOSE,
         )
 
@@ -423,10 +429,12 @@ def main():
         verbose=VERBOSE,
         use_E_asym=USE_E_ASYM,
         use_M_mono=USE_M_MONO,
+        m_mono_peak_ratio=M_MONO_PEAK_RATIO,
         # —— 将 run 的可调参数传入 search —— #
         vote_theta_res_deg=VOTE_THETA_RES_DEG,
         vote_k_ratio=VOTE_K_RATIO,
         vote_theta_range=VOTE_THETA_RANGE,
+        top_k_candidates=TOP_K_CANDIDATES,
         #vote_rho_step=VOTE_RHO_STEP,
     )
 
