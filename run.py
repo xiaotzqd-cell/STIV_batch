@@ -36,6 +36,8 @@ TOP_K_CANDIDATES: int = 10
 # 边缘提取方式：可选 "canny" 或 "sobel"
 EDGE_METHOD: str = "sobel"
 USE_SOBEL_HIGHPASS: bool = False  # True 表示使用高通+Sobel 梯度幅值
+# Sobel 得分阈值系数（thr = mu + k_sigma * sigma）
+K_SIGMA: float = 1.0
 
 # 速度阈值设置（m/s），可按需修改；留 None 表示不限制
 V_MIN: Optional[float] = 0.5
@@ -385,6 +387,7 @@ def main():
             vote_theta_range=VOTE_THETA_RANGE,
             top_k_candidates=TOP_K_CANDIDATES,
             verbose=VERBOSE,
+            k_sigma=K_SIGMA,
         )
 
         print("\n====== 多点测速结果 ======")
@@ -434,6 +437,7 @@ def main():
         vote_k_ratio=VOTE_K_RATIO,
         vote_theta_range=VOTE_THETA_RANGE,
         top_k_candidates=TOP_K_CANDIDATES,
+        k_sigma=K_SIGMA,
         #vote_rho_step=VOTE_RHO_STEP,
     )
 

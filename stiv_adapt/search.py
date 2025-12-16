@@ -231,6 +231,7 @@ def _adaptive_direction_search_on_frames(
     vote_theta_res_deg: float,
     vote_k_ratio: float,
     vote_theta_range: Tuple[float, float],
+    k_sigma: float,
     save_candidate_overlays: bool,
     top_k_candidates: int,
 ) -> Dict[str, Any]:
@@ -292,6 +293,7 @@ def _adaptive_direction_search_on_frames(
                 use_circular_roi=use_circular_roi,
                 roi_radius_frac=roi_radius_frac,
                 verbose=False,
+                k_sigma=k_sigma,
             )
         else:
             edges = compute_canny_edges(
@@ -469,6 +471,7 @@ def _adaptive_direction_search_on_frames(
                 use_circular_roi=use_circular_roi,
                 roi_radius_frac=roi_radius_frac,
                 verbose=False,
+                k_sigma=k_sigma,
             )
         else:
             edges_best = compute_canny_edges(
@@ -592,6 +595,7 @@ def adaptive_direction_search(video_path: str,
                               m_mono_peak_ratio: float = 0.5,
                               save_candidate_overlays: bool = False,
                               top_k_candidates: int = 10,
+                              k_sigma: float = 1.0,
                               ) -> Dict[str, Any]:
     frames, fps = _load_video_frames(video_path, max_frames)
 
@@ -618,6 +622,7 @@ def adaptive_direction_search(video_path: str,
         vote_theta_res_deg=vote_theta_res_deg,
         vote_k_ratio=vote_k_ratio,
         vote_theta_range=vote_theta_range,
+        k_sigma=k_sigma,
         save_candidate_overlays=save_candidate_overlays,
         top_k_candidates=top_k_candidates,
     )
@@ -695,6 +700,7 @@ def batch_probe_along_line(
     use_M_mono: bool,
     m_mono_peak_ratio: float,
     top_k_candidates: int,
+    k_sigma: float,
 ) -> List[Dict[str, Any]]:
     """沿着给定直线执行多点测速。"""
 
@@ -751,6 +757,7 @@ def batch_probe_along_line(
                 vote_theta_res_deg=vote_theta_res_deg,
                 vote_k_ratio=vote_k_ratio,
                 vote_theta_range=vote_theta_range,
+                k_sigma=k_sigma,
                 save_candidate_overlays=False,
                 top_k_candidates=top_k_candidates,
             )
