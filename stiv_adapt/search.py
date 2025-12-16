@@ -74,11 +74,11 @@ def _compute_symmetry_score(scores: np.ndarray, best_idx: int) -> float:
     return float("nan")
 
 
-def _compute_monotonicity_score(scores: np.ndarray, best_idx: int) -> float:
+def _compute_monotonicity_score(scores: np.ndarray, best_idx: int, peak_ratio: float) -> float:
     """依据峰值左右半峰范围的单调性计算 M_mono。
 
     逻辑：
-    1) 以 half_score = 0.5 * peak 为界，分别找到左右半峰边界索引；
+    1) 以阈值 score_th = peak_ratio * peak 为界，分别找到左右半峰边界索引；
     2) 取 span=min(左跨度, 右跨度)，表示在半峰区间内可以向两侧走的步数；
     3) 从峰顶向左右各走 span 步，理想情况应当单调不增；
        若出现“当前值比前一值更大”，视为一次违例；
@@ -90,16 +90,17 @@ def _compute_monotonicity_score(scores: np.ndarray, best_idx: int) -> float:
     if best_idx < 0 or best_idx >= scores.size:
         return float("nan")
 
+    ratio = max(0.0, min(1.0, float(peak_ratio)))
     best_score = float(scores[best_idx])
-    half_score = 0.5 * best_score
+    score_th = ratio * best_score
 
     left_idx = best_idx
-    while left_idx > 0 and scores[left_idx] > half_score:
+    while left_idx > 0 and scores[left_idx] > score_th:
         left_idx -= 1
 
     right_idx = best_idx
     last = scores.size - 1
-    while right_idx < last and scores[right_idx] > half_score:
+    while right_idx < last and scores[right_idx] > score_th:
         right_idx += 1
 
     span_left = best_idx - left_idx
@@ -226,10 +227,12 @@ def _adaptive_direction_search_on_frames(
     verbose: bool,
     use_E_asym: bool,
     use_M_mono: bool,
+    m_mono_peak_ratio: float,
     vote_theta_res_deg: float,
     vote_k_ratio: float,
     vote_theta_range: Tuple[float, float],
     save_candidate_overlays: bool,
+    top_k_candidates: int,
 ) -> Dict[str, Any]:
     probe_rows: List[Dict[str, Any]] = []
     candidates: List[Dict[str, Any]] = []
@@ -347,7 +350,7 @@ def _adaptive_direction_search_on_frames(
         slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
 
         E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
-        M_mono = _compute_monotonicity_score(votes_filtered, peak_idx) if use_M_mono else float("nan")
+        M_mono = _compute_monotonicity_score(votes_filtered, peak_idx, m_mono_peak_ratio) if use_M_mono else float("nan")
 
         #
         # —— 记录/打印本角度的 ρ 参数与得分 —— #
@@ -407,7 +410,8 @@ def _adaptive_direction_search_on_frames(
         a += angle_step
 
     if candidates:
-        top_candidates = sorted(candidates, key=lambda d: (-d["score"], d["angle_probe"]))[:10]
+        k = top_k_candidates if top_k_candidates > 0 else len(candidates)
+        top_candidates = sorted(candidates, key=lambda d: (-d["score"], d["angle_probe"]))[:k]
         if use_M_mono:
             def _mono_key(c: Dict[str, Any]):
                 mono = c.get("M_mono", float("nan"))
@@ -494,7 +498,7 @@ def _adaptive_direction_search_on_frames(
             slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
 
             E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
-            M_mono = _compute_monotonicity_score(votes_filtered, peak_idx) if use_M_mono else float("nan")
+            M_mono = _compute_monotonicity_score(votes_filtered, peak_idx, m_mono_peak_ratio) if use_M_mono else float("nan")
 
             best["angle"] = alpha_deg
             best["slope"] = slope
@@ -549,8 +553,9 @@ def _adaptive_direction_search_on_frames(
 
     # 也打印一个简短汇总（前若干项）
     if verbose and len(probe_rows) > 0:
-        top = sorted(probe_rows, key=lambda d: (-d["score_lines"], d["probe_angle_deg"]))[:10]
-        print("[angles] Top-10 by score_lines:")
+        top_num = top_k_candidates if top_k_candidates > 0 else len(probe_rows)
+        top = sorted(probe_rows, key=lambda d: (-d["score_lines"], d["probe_angle_deg"]))[:top_num]
+        print(f"[angles] Top-{len(top)} by score_lines:")
         for r0 in top:
             score_val = r0["score_lines"]
             score_fmt = f"{score_val:.1f}" if edge_method == "sobel" else f"{int(round(score_val))}"
@@ -584,7 +589,9 @@ def adaptive_direction_search(video_path: str,
                               *,
                               use_E_asym: bool = False,
                               use_M_mono: bool = False,
-                              save_candidate_overlays: bool = False
+                              m_mono_peak_ratio: float = 0.5,
+                              save_candidate_overlays: bool = False,
+                              top_k_candidates: int = 10,
                               ) -> Dict[str, Any]:
     frames, fps = _load_video_frames(video_path, max_frames)
 
@@ -607,10 +614,12 @@ def adaptive_direction_search(video_path: str,
         verbose=verbose,
         use_E_asym=use_E_asym,
         use_M_mono=use_M_mono,
+        m_mono_peak_ratio=m_mono_peak_ratio,
         vote_theta_res_deg=vote_theta_res_deg,
         vote_k_ratio=vote_k_ratio,
         vote_theta_range=vote_theta_range,
         save_candidate_overlays=save_candidate_overlays,
+        top_k_candidates=top_k_candidates,
     )
 
 
@@ -684,6 +693,8 @@ def batch_probe_along_line(
     *,
     use_E_asym: bool,
     use_M_mono: bool,
+    m_mono_peak_ratio: float,
+    top_k_candidates: int,
 ) -> List[Dict[str, Any]]:
     """沿着给定直线执行多点测速。"""
 
@@ -736,10 +747,12 @@ def batch_probe_along_line(
                 verbose=verbose,
                 use_E_asym=use_E_asym,
                 use_M_mono=use_M_mono,
+                m_mono_peak_ratio=m_mono_peak_ratio,
                 vote_theta_res_deg=vote_theta_res_deg,
                 vote_k_ratio=vote_k_ratio,
                 vote_theta_range=vote_theta_range,
                 save_candidate_overlays=False,
+                top_k_candidates=top_k_candidates,
             )
 
             # 保存处理前后的 STI 到独立文件，便于逐点查看
