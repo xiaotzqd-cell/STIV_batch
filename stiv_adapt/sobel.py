@@ -71,7 +71,8 @@ def hough_angle_score_weighted(J: np.ndarray,
                                rho_step: float = 1.0,
                                weight_min: float = DEFAULT_WEIGHT_MIN,
                                weight_max: float = DEFAULT_WEIGHT_MAX,
-                               roi_mask: Optional[np.ndarray] = None
+                               roi_mask: Optional[np.ndarray] = None,
+                               k_sigma: float = 1.0,
                                ) -> tuple[np.ndarray, np.ndarray]:
     """
     在 J 图像上做“灰度加权”的简化 Hough 角度评分。
@@ -131,7 +132,7 @@ def hough_angle_score_weighted(J: np.ndarray,
 
         mu = float(acc.mean())
         sigma = float(acc.std())
-        thr = mu + sigma
+        thr = mu + float(k_sigma) * sigma
 
         above = acc - thr
         above[above < 0.0] = 0.0
@@ -149,6 +150,8 @@ def hough_angle_voting_weighted(
     use_circular_roi: bool = False,
     roi_radius_frac: float = 1.0,
     verbose: bool = False,
+    *,
+    k_sigma: float = 1.0,
 ) -> Tuple[float, List[Tuple[float, float]], np.ndarray, np.ndarray, int, Dict[str, float]]:
     """基于 Sobel 梯度幅值的“灰度加权”角度评分。
 
@@ -174,6 +177,7 @@ def hough_angle_voting_weighted(
         weight_min=float(weight_min),
         weight_max=float(weight_max),
         roi_mask=roi_mask,
+        k_sigma=k_sigma,
     )
 
     rho_max = int(np.ceil(np.hypot(W / 2.0, H / 2.0)))
