@@ -1,9 +1,12 @@
 import cv2
 import os
 
-video_path = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
-pic_path =r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ_calibration_image.jpg"
+#video_path = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
+video_path = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
+
 #pic_path =r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ_calibration_image.jpg"
+pic_path =r"D:\PycharmProjects\River_redio\BRJ_calibration_image.jpg"#新电脑
+
 cap = cv2.VideoCapture(video_path)
 img = cv2.imread(pic_path,cv2.IMREAD_COLOR)
 

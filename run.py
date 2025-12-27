@@ -8,7 +8,8 @@ from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 t0 = time.perf_counter()
 # ========== 用户配置区（按需修改） ==========
-VIDEO = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
+#VIDEO = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
+VIDEO = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 
 CENTER: Tuple[int, int] =(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
 #多点测速参数
