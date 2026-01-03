@@ -234,16 +234,24 @@ def _adaptive_direction_search_on_frames(
     k_sigma: float,
     save_candidate_overlays: bool,
     top_k_candidates: int,
+    score_mode: str,
 ) -> Dict[str, Any]:
     probe_rows: List[Dict[str, Any]] = []
     candidates: List[Dict[str, Any]] = []
     t_total0 = time.perf_counter()
     angle_times: List[Dict[str, float]] = []
 
+    score_mode = (score_mode or "peak_votes").strip().lower()
+    if score_mode not in {"peak_votes", "peak_ratio"}:
+        score_mode = "peak_votes"
+
     best: Dict[str, Any] = {
         "angle": None,
         "slope": None,
         "score": -1.0,
+        "score_mode": score_mode,
+        "peak_votes": None,
+        "peak_ratio": None,
         "theta_fft": None,
         "sti_raw": None,
         "sti_filtered": None,
@@ -331,6 +339,7 @@ def _adaptive_direction_search_on_frames(
                 "phi_star_deg": float("nan"),
                 "alpha_star_deg": float("nan"),
                 "score_lines": float(0.0),
+                "peak_ratio": float("nan"),
                 "rho_max": int(rho_max),
                 "rho_bins": int(rho_bins),
                 "K": int(K_here),
@@ -347,9 +356,12 @@ def _adaptive_direction_search_on_frames(
         peak_idx = int(np.argmax(votes_filtered))
         theta_normal_deg = float(theta_axis[peak_idx])
         peak_votes = float(votes_filtered[peak_idx])        # = 该 θ 上的得分
+        sum_votes = float(votes_filtered.sum())
+        peak_ratio = peak_votes / (sum_votes + 1e-9)
         alpha_deg = (theta_normal_deg + 90.0) % 180.0
         tan_a = math.tan(math.radians(alpha_deg))
         slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
+        score_for_rank = peak_ratio if score_mode == "peak_ratio" else peak_votes
 
         E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
         M_mono = _compute_monotonicity_score(votes_filtered, peak_idx, m_mono_peak_ratio) if use_M_mono else float("nan")
@@ -366,6 +378,7 @@ def _adaptive_direction_search_on_frames(
             "phi_star_deg": float(theta_normal_deg),
             "alpha_star_deg": float(alpha_deg),
             "score_lines": float(peak_votes),
+            "peak_ratio": float(peak_ratio),
             "rho_max": int(rho_max),
             "rho_bins": int(rho_bins),
             "K": int(K_here),
@@ -378,7 +391,8 @@ def _adaptive_direction_search_on_frames(
 
         # 也在控制台打一行，便于你现场看
         score_txt = f"{peak_votes:.1f}" if edge_method == "sobel" else f"{int(round(peak_votes))}"
-        print(f"[angle] a={a:+06.1f}° | score={score_txt} | φ*={theta_normal_deg:.1f}° | "
+        ratio_txt = f" | ratio={peak_ratio:.4f}" if score_mode == "peak_ratio" else ""
+        print(f"[angle] a={a:+06.1f}° | score={score_txt}{ratio_txt} | φ*={theta_normal_deg:.1f}° | "
               f"ρ_max={int(rho_max)} | ρ_bins={int(rho_bins)} | K={int(K_here)}")
 
 
@@ -394,7 +408,9 @@ def _adaptive_direction_search_on_frames(
         cand = {
             "angle": alpha_deg,
             "slope": slope,
-            "score": peak_votes,
+            "score": score_for_rank,
+            "peak_votes": peak_votes,
+            "peak_ratio": peak_ratio,
             "angle_probe": a,
         }
         if use_E_asym:
@@ -403,9 +419,11 @@ def _adaptive_direction_search_on_frames(
             cand["M_mono"] = float(M_mono)
         candidates.append(cand)
 
-        if peak_votes > best["score"]:
+        if score_for_rank > best["score"]:
             best.update(dict(
-                angle=alpha_deg, slope=slope, score=peak_votes,
+                angle=alpha_deg, slope=slope, score=score_for_rank,
+                peak_votes=peak_votes,
+                peak_ratio=peak_ratio,
                 theta_fft=theta_fft, sti_raw=sti, angle_probe=a,
                 E_asym=E_asym, M_mono=M_mono,
             ))
@@ -434,6 +452,8 @@ def _adaptive_direction_search_on_frames(
             angle=chosen.get("angle"),
             slope=chosen.get("slope"),
             score=chosen.get("score", -1.0),
+            peak_votes=chosen.get("peak_votes"),
+            peak_ratio=chosen.get("peak_ratio"),
             angle_probe=chosen.get("angle_probe"),
             E_asym=chosen.get("E_asym", float("nan")),
             M_mono=chosen.get("M_mono", float("nan")),
@@ -496,16 +516,21 @@ def _adaptive_direction_search_on_frames(
             peak_idx = int(np.argmax(votes_filtered))
             theta_normal_deg = float(theta_axis[peak_idx])
             peak_votes = float(votes_filtered[peak_idx])
+            sum_votes = float(votes_filtered.sum())
+            peak_ratio = peak_votes / (sum_votes + 1e-9)
             alpha_deg = (theta_normal_deg + 90.0) % 180.0
             tan_a = math.tan(math.radians(alpha_deg))
             slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
+            score_for_rank = peak_ratio if score_mode == "peak_ratio" else peak_votes
 
             E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
             M_mono = _compute_monotonicity_score(votes_filtered, peak_idx, m_mono_peak_ratio) if use_M_mono else float("nan")
 
             best["angle"] = alpha_deg
             best["slope"] = slope
-            best["score"] = peak_votes
+            best["score"] = score_for_rank
+            best["peak_votes"] = peak_votes
+            best["peak_ratio"] = peak_ratio
             if use_E_asym:
                 best["E_asym"] = E_asym
             if use_M_mono:
@@ -538,7 +563,7 @@ def _adaptive_direction_search_on_frames(
     # 写 CSV
     try:
         fieldnames = ["probe_angle_deg", "phi_star_deg", "alpha_star_deg",
-                      "score_lines", "rho_max", "rho_bins", "K"]
+                      "score_lines", "peak_ratio", "rho_max", "rho_bins", "K"]
         if use_E_asym:
             fieldnames.append("E_asym")
         if use_M_mono:
@@ -596,6 +621,7 @@ def adaptive_direction_search(video_path: str,
                               save_candidate_overlays: bool = False,
                               top_k_candidates: int = 10,
                               k_sigma: float = 1.0,
+                              score_mode: str = "peak_votes",
                               ) -> Dict[str, Any]:
     frames, fps = _load_video_frames(video_path, max_frames)
 
@@ -625,6 +651,7 @@ def adaptive_direction_search(video_path: str,
         k_sigma=k_sigma,
         save_candidate_overlays=save_candidate_overlays,
         top_k_candidates=top_k_candidates,
+        score_mode=score_mode,
     )
 
 
@@ -701,6 +728,7 @@ def batch_probe_along_line(
     m_mono_peak_ratio: float,
     top_k_candidates: int,
     k_sigma: float,
+    score_mode: str,
 ) -> List[Dict[str, Any]]:
     """沿着给定直线执行多点测速。"""
 
@@ -760,6 +788,7 @@ def batch_probe_along_line(
                 k_sigma=k_sigma,
                 save_candidate_overlays=False,
                 top_k_candidates=top_k_candidates,
+                score_mode=score_mode,
             )
 
             # 保存处理前后的 STI 到独立文件，便于逐点查看

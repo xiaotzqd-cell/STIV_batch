@@ -35,6 +35,8 @@ M_MONO_PEAK_RATIO: float = 0.5
 TOP_K_CANDIDATES: int = 4
 # Sobel 得分阈值系数（thr = mu + k_sigma * sigma）
 K_SIGMA: float = 1
+# 最佳测速线方向选择策略：peak_votes / peak_ratio
+SCORE_MODE: str = "peak_votes"
 # 边缘提取方式：可选 "canny" 或 "sobel"
 EDGE_METHOD: str = "sobel"
 USE_SOBEL_HIGHPASS: bool = False  # True 表示使用高通+Sobel 梯度幅值
@@ -389,6 +391,7 @@ def main():
             top_k_candidates=TOP_K_CANDIDATES,
             verbose=VERBOSE,
             k_sigma=K_SIGMA,
+            score_mode=SCORE_MODE,
         )
 
         print("\n====== 多点测速结果 ======")
@@ -439,6 +442,7 @@ def main():
         vote_theta_range=VOTE_THETA_RANGE,
         top_k_candidates=TOP_K_CANDIDATES,
         k_sigma=K_SIGMA,
+        score_mode=SCORE_MODE,
         #vote_rho_step=VOTE_RHO_STEP,
     )
 
@@ -475,7 +479,12 @@ def main():
     print(f"测速线方向: {best.get('angle_probe'):} °")
     print(f"最佳纹理角度α: {best['angle']:} °")
 
-    print(f"Hough 得分(交线频率): {best['score']:.1f}")
+    print(f"测速线评分策略: {best.get('score_mode', SCORE_MODE)}")
+    if best.get("peak_votes") is not None:
+        print(f"Hough 主峰强度(peak_votes): {best['peak_votes']:.1f}")
+    if best.get("peak_ratio") is not None:
+        print(f"主峰占比(peak_ratio): {best['peak_ratio']:.4f}")
+    print(f"用于筛选的得分: {best['score']:.4f}" if best.get("score_mode") == "peak_ratio" else f"用于筛选的得分: {best['score']:.1f}")
     print(f"STI 斜率 slope (px/frame): {best['slope'] if best['slope'] is not None else 'None'}")
     if USE_M_MONO:
         print(f"M_mono 单调性评分: {best.get('M_mono')}")
