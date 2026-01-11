@@ -23,6 +23,7 @@ from .sobel import (
     DEFAULT_WEIGHT_MAX,
 )
 from .vote_accumulator import hough_angle_voting_min
+from .autocorrelation import AutoCorrConfig, compute_autocorr_and_concentration
 
 vote_rho_step = 1
 
@@ -224,6 +225,7 @@ def _adaptive_direction_search_on_frames(
     fft_half_width_deg: float,
     fft_rmin_ratio: float,
     fft_rmax_ratio: float,
+    direction_method: str,
     verbose: bool,
     use_E_asym: bool,
     use_M_mono: bool,
@@ -265,6 +267,14 @@ def _adaptive_direction_search_on_frames(
     if edge_method not in {"canny", "sobel"}:
         edge_method = "canny"
 
+    direction_method = (direction_method or "hough").lower()
+    if direction_method not in {"hough", "autocorr"}:
+        direction_method = "hough"
+    if direction_method == "autocorr":
+        use_E_asym = False
+        use_M_mono = False
+        best["score_mode"] = "autocorr_c"
+
     n_lines = 0
     a = angle_start    #测速线角度
     while a <= angle_end + 1e-6:
@@ -273,160 +283,224 @@ def _adaptive_direction_search_on_frames(
         if sti is None:
             a += angle_step; continue
 
-        sti_in = sti; theta_fft = None
-        if use_fft_fan_filter:
-            sti_in, theta_fft = enhance_sti_via_fft_fan(
-                sti, half_width_deg=fft_half_width_deg,
-                rmin_ratio=fft_rmin_ratio, rmax_ratio=fft_rmax_ratio
-            )
-        else:
-            _save_img("step1_sti_raw.png", sti)
+        if direction_method == "autocorr":
+            if edge_method != "sobel":
+                edge_method = "sobel"
 
-        if edge_method == "sobel":
-            edges = compute_sobel_edges(
-                sti_in,
-                use_highpass=use_sobel_highpass,
+            cfg = AutoCorrConfig(
+                use_sobel_mag=True,
+                use_sobel_highpass=use_sobel_highpass,
                 use_circular_roi=use_circular_roi,
                 roi_radius_frac=roi_radius_frac,
-                save_mag_name="step6_sobel_mag_tmp.png",
-                save_edge_name="step7_sobel_edges_tmp.png",
-                verbose=False,
             )
-            total, angle_votes, votes_full, theta_axis, rho_max, best_info = hough_angle_voting_weighted(
-                edges,
-                theta_res_deg=vote_theta_res_deg,
-                rho_step=vote_rho_step,
-                weight_min=DEFAULT_WEIGHT_MIN,
-                weight_max=DEFAULT_WEIGHT_MAX,
-                use_circular_roi=use_circular_roi,
-                roi_radius_frac=roi_radius_frac,
-                verbose=False,
-                k_sigma=k_sigma,
-            )
+            ac = compute_autocorr_and_concentration(sti, cfg)
+            theta_deg = ac["theta_deg"]
+            mu = ac["mu"]
+            C = float(ac["C"])
+
+            mu_max_idx = int(np.argmax(mu)) if mu.size > 0 else 0
+            mu_max = float(mu[mu_max_idx]) if mu.size > 0 else float("nan")
+            theta_deg_max = float(theta_deg[mu_max_idx]) if mu.size > 0 else float("nan")
+
+            tan_a = math.tan(math.radians(a))
+            slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
+            score_for_rank = C
+
+            row = {
+                "probe_angle_deg": float(a),
+                "C": float(C),
+                "mu_max": float(mu_max),
+                "theta_deg_max": float(theta_deg_max),
+                "r_min": int(cfg.r_min),
+                "r_max": int(cfg.r_max),
+                "n_theta": int(cfg.n_theta),
+                "baseline_mode": str(cfg.baseline_mode),
+                "bottom_q": float(cfg.bottom_q),
+                "use_sobel_mag": bool(cfg.use_sobel_mag),
+                "use_sobel_highpass": bool(cfg.use_sobel_highpass),
+                "use_circular_roi": bool(cfg.use_circular_roi),
+                "roi_radius_frac": float(cfg.roi_radius_frac),
+            }
+            probe_rows.append(row)
+
+            if verbose:
+                print(f"[angle] a={a:+06.1f}° | C={C:.4f} | mu_max={mu_max:.4f} | theta_mu={theta_deg_max:.1f}°")
+
+            angle_times.append({"angle": float(a), "seconds": float(time.perf_counter() - t0)})
+            cand = {
+                "angle": float(a),
+                "slope": slope,
+                "score": score_for_rank,
+                "C": float(C),
+                "mu_max": float(mu_max),
+                "theta_deg_max": float(theta_deg_max),
+                "angle_probe": a,
+            }
+            candidates.append(cand)
+
+            if score_for_rank > best["score"]:
+                best.update(dict(
+                    angle=float(a), slope=slope, score=score_for_rank,
+                    peak_votes=None,
+                    peak_ratio=None,
+                    theta_fft=None, sti_raw=sti, angle_probe=a,
+                    E_asym=float("nan"), M_mono=float("nan"),
+                ))
         else:
-            edges = compute_canny_edges(
-                sti_in, use_circular_roi=use_circular_roi,
-                roi_radius_frac=roi_radius_frac,
-                save_name="step7_canny_edges_tmp.png",
-                pre_canny_save_name="step6_pre_canny_eq_blur_tmp.png",
-                verbose=False
-            )
+            sti_in = sti; theta_fft = None
+            if use_fft_fan_filter:
+                sti_in, theta_fft = enhance_sti_via_fft_fan(
+                    sti, half_width_deg=fft_half_width_deg,
+                    rmin_ratio=fft_rmin_ratio, rmax_ratio=fft_rmax_ratio
+                )
+            else:
+                _save_img("step1_sti_raw.png", sti)
 
-            # —— 6 项解包（论文口径 + 双线性入桶）——
-            total, angle_votes, votes_full, theta_axis, rho_max, best_info = hough_angle_voting_min(
-                edges,
-                theta_res_deg=vote_theta_res_deg,
-                rho_step=vote_rho_step,  # ← 用你真正传给 Hough 的 rho_step
-                k_ratio=float(vote_k_ratio),
-                verbose=False
-            )
-        rho_bins = int(np.floor((2 * rho_max) / vote_rho_step) + 1)
+            if edge_method == "sobel":
+                edges = compute_sobel_edges(
+                    sti_in,
+                    use_highpass=use_sobel_highpass,
+                    use_circular_roi=use_circular_roi,
+                    roi_radius_frac=roi_radius_frac,
+                    save_mag_name="step6_sobel_mag_tmp.png",
+                    save_edge_name="step7_sobel_edges_tmp.png",
+                    verbose=False,
+                )
+                total, angle_votes, votes_full, theta_axis, rho_max, best_info = hough_angle_voting_weighted(
+                    edges,
+                    theta_res_deg=vote_theta_res_deg,
+                    rho_step=vote_rho_step,
+                    weight_min=DEFAULT_WEIGHT_MIN,
+                    weight_max=DEFAULT_WEIGHT_MAX,
+                    use_circular_roi=use_circular_roi,
+                    roi_radius_frac=roi_radius_frac,
+                    verbose=False,
+                    k_sigma=k_sigma,
+                )
+            else:
+                edges = compute_canny_edges(
+                    sti_in, use_circular_roi=use_circular_roi,
+                    roi_radius_frac=roi_radius_frac,
+                    save_name="step7_canny_edges_tmp.png",
+                    pre_canny_save_name="step6_pre_canny_eq_blur_tmp.png",
+                    verbose=False
+                )
 
-        # 角度过滤
-        votes_filtered = _apply_theta_filters_on_votes(
-            votes_full, theta_axis,
-            theta_range=vote_theta_range
-        )
-        if votes_filtered.sum() <= 0:
+                # —— 6 项解包（论文口径 + 双线性入桶）——
+                total, angle_votes, votes_full, theta_axis, rho_max, best_info = hough_angle_voting_min(
+                    edges,
+                    theta_res_deg=vote_theta_res_deg,
+                    rho_step=vote_rho_step,  # ← 用你真正传给 Hough 的 rho_step
+                    k_ratio=float(vote_k_ratio),
+                    verbose=False
+                )
+            rho_bins = int(np.floor((2 * rho_max) / vote_rho_step) + 1)
+
+            # 角度过滤
+            votes_filtered = _apply_theta_filters_on_votes(
+                votes_full, theta_axis,
+                theta_range=vote_theta_range
+            )
+            if votes_filtered.sum() <= 0:
+                #
+                # 记录一行（无峰时，得分=0）
+                H, W = edges.shape[:2]
+                r = min(W / 2.0, H / 2.0)
+                K_here = int(max(1, round(float(vote_k_ratio) * r)))
+                rho_bins = int(np.floor((2 * rho_max) / 1.0) + 1)
+                row = {
+                    "probe_angle_deg": float(a),
+                    "phi_star_deg": float("nan"),
+                    "alpha_star_deg": float("nan"),
+                    "score_lines": float(0.0),
+                    "peak_ratio": float("nan"),
+                    "rho_max": int(rho_max),
+                    "rho_bins": int(rho_bins),
+                    "K": int(K_here),
+                }
+                if use_E_asym:
+                    row["E_asym"] = float("nan")
+                if use_M_mono:
+                    row["M_mono"] = float("nan")
+                probe_rows.append(row)
+                #
+                angle_times.append({"angle": float(a), "seconds": float(time.perf_counter() - t0)})
+                a += angle_step;continue
+
+            peak_idx = int(np.argmax(votes_filtered))
+            theta_normal_deg = float(theta_axis[peak_idx])
+            peak_votes = float(votes_filtered[peak_idx])        # = 该 θ 上的得分
+            sum_votes = float(votes_filtered.sum())
+            peak_ratio = peak_votes / (sum_votes + 1e-9)
+            alpha_deg = (theta_normal_deg + 90.0) % 180.0
+            tan_a = math.tan(math.radians(alpha_deg))
+            slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
+            score_for_rank = peak_ratio if score_mode == "peak_ratio" else peak_votes
+
+            E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
+            M_mono = _compute_monotonicity_score(votes_filtered, peak_idx, m_mono_peak_ratio) if use_M_mono else float("nan")
+
             #
-            # 记录一行（无峰时，得分=0）
+            # —— 记录/打印本角度的 ρ 参数与得分 —— #
             H, W = edges.shape[:2]
             r = min(W / 2.0, H / 2.0)
             K_here = int(max(1, round(float(vote_k_ratio) * r)))
             rho_bins = int(np.floor((2 * rho_max) / 1.0) + 1)
+
             row = {
                 "probe_angle_deg": float(a),
-                "phi_star_deg": float("nan"),
-                "alpha_star_deg": float("nan"),
-                "score_lines": float(0.0),
-                "peak_ratio": float("nan"),
+                "phi_star_deg": float(theta_normal_deg),
+                "alpha_star_deg": float(alpha_deg),
+                "score_lines": float(peak_votes),
+                "peak_ratio": float(peak_ratio),
                 "rho_max": int(rho_max),
                 "rho_bins": int(rho_bins),
                 "K": int(K_here),
             }
             if use_E_asym:
-                row["E_asym"] = float("nan")
+                row["E_asym"] = float(E_asym)
             if use_M_mono:
-                row["M_mono"] = float("nan")
+                row["M_mono"] = float(M_mono)
             probe_rows.append(row)
-            #
+
+            # 也在控制台打一行，便于你现场看
+            score_txt = f"{peak_votes:.1f}" if edge_method == "sobel" else f"{int(round(peak_votes))}"
+            ratio_txt = f" | ratio={peak_ratio:.4f}" if score_mode == "peak_ratio" else ""
+            print(f"[angle] a={a:+06.1f}° | score={score_txt}{ratio_txt} | φ*={theta_normal_deg:.1f}° | "
+                  f"ρ_max={int(rho_max)} | ρ_bins={int(rho_bins)} | K={int(K_here)}")
+
+
+            if save_candidate_overlays:
+                _draw_line_overlay(
+                    sti, alpha_deg=alpha_deg, theta_normal_deg=theta_normal_deg,
+                    slope=slope, peak_votes=peak_votes,
+                    save_name=f"step8_hough_overlay_{a:+06.1f}.png"
+                )
+
             angle_times.append({"angle": float(a), "seconds": float(time.perf_counter() - t0)})
-            a += angle_step;continue
 
-        peak_idx = int(np.argmax(votes_filtered))
-        theta_normal_deg = float(theta_axis[peak_idx])
-        peak_votes = float(votes_filtered[peak_idx])        # = 该 θ 上的得分
-        sum_votes = float(votes_filtered.sum())
-        peak_ratio = peak_votes / (sum_votes + 1e-9)
-        alpha_deg = (theta_normal_deg + 90.0) % 180.0
-        tan_a = math.tan(math.radians(alpha_deg))
-        slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
-        score_for_rank = peak_ratio if score_mode == "peak_ratio" else peak_votes
+            cand = {
+                "angle": alpha_deg,
+                "slope": slope,
+                "score": score_for_rank,
+                "peak_votes": peak_votes,
+                "peak_ratio": peak_ratio,
+                "angle_probe": a,
+            }
+            if use_E_asym:
+                cand["E_asym"] = float(E_asym)
+            if use_M_mono:
+                cand["M_mono"] = float(M_mono)
+            candidates.append(cand)
 
-        E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
-        M_mono = _compute_monotonicity_score(votes_filtered, peak_idx, m_mono_peak_ratio) if use_M_mono else float("nan")
-
-        #
-        # —— 记录/打印本角度的 ρ 参数与得分 —— #
-        H, W = edges.shape[:2]
-        r = min(W / 2.0, H / 2.0)
-        K_here = int(max(1, round(float(vote_k_ratio) * r)))
-        rho_bins = int(np.floor((2 * rho_max) / 1.0) + 1)
-
-        row = {
-            "probe_angle_deg": float(a),
-            "phi_star_deg": float(theta_normal_deg),
-            "alpha_star_deg": float(alpha_deg),
-            "score_lines": float(peak_votes),
-            "peak_ratio": float(peak_ratio),
-            "rho_max": int(rho_max),
-            "rho_bins": int(rho_bins),
-            "K": int(K_here),
-        }
-        if use_E_asym:
-            row["E_asym"] = float(E_asym)
-        if use_M_mono:
-            row["M_mono"] = float(M_mono)
-        probe_rows.append(row)
-
-        # 也在控制台打一行，便于你现场看
-        score_txt = f"{peak_votes:.1f}" if edge_method == "sobel" else f"{int(round(peak_votes))}"
-        ratio_txt = f" | ratio={peak_ratio:.4f}" if score_mode == "peak_ratio" else ""
-        print(f"[angle] a={a:+06.1f}° | score={score_txt}{ratio_txt} | φ*={theta_normal_deg:.1f}° | "
-              f"ρ_max={int(rho_max)} | ρ_bins={int(rho_bins)} | K={int(K_here)}")
-
-
-        if save_candidate_overlays:
-            _draw_line_overlay(
-                sti, alpha_deg=alpha_deg, theta_normal_deg=theta_normal_deg,
-                slope=slope, peak_votes=peak_votes,
-                save_name=f"step8_hough_overlay_{a:+06.1f}.png"
-            )
-
-        angle_times.append({"angle": float(a), "seconds": float(time.perf_counter() - t0)})
-
-        cand = {
-            "angle": alpha_deg,
-            "slope": slope,
-            "score": score_for_rank,
-            "peak_votes": peak_votes,
-            "peak_ratio": peak_ratio,
-            "angle_probe": a,
-        }
-        if use_E_asym:
-            cand["E_asym"] = float(E_asym)
-        if use_M_mono:
-            cand["M_mono"] = float(M_mono)
-        candidates.append(cand)
-
-        if score_for_rank > best["score"]:
-            best.update(dict(
-                angle=alpha_deg, slope=slope, score=score_for_rank,
-                peak_votes=peak_votes,
-                peak_ratio=peak_ratio,
-                theta_fft=theta_fft, sti_raw=sti, angle_probe=a,
-                E_asym=E_asym, M_mono=M_mono,
-            ))
+            if score_for_rank > best["score"]:
+                best.update(dict(
+                    angle=alpha_deg, slope=slope, score=score_for_rank,
+                    peak_votes=peak_votes,
+                    peak_ratio=peak_ratio,
+                    theta_fft=theta_fft, sti_raw=sti, angle_probe=a,
+                    E_asym=E_asym, M_mono=M_mono,
+                ))
         a += angle_step
 
     if candidates:
@@ -460,7 +534,7 @@ def _adaptive_direction_search_on_frames(
         )
 
     # —— 用最佳角度再落盘一次 —— #
-    if best["angle"] is not None:
+    if best["angle"] is not None and direction_method != "autocorr":
         a_best = best.get("angle_probe", angle_start)
         sti_best = build_sti_from_frames(frames, center, length_px, angle_deg=a_best)
         best["sti_raw"] = sti_best
@@ -562,12 +636,29 @@ def _adaptive_direction_search_on_frames(
 
     # 写 CSV
     try:
-        fieldnames = ["probe_angle_deg", "phi_star_deg", "alpha_star_deg",
-                      "score_lines", "peak_ratio", "rho_max", "rho_bins", "K"]
-        if use_E_asym:
-            fieldnames.append("E_asym")
-        if use_M_mono:
-            fieldnames.append("M_mono")
+        if direction_method == "autocorr":
+            fieldnames = [
+                "probe_angle_deg",
+                "C",
+                "mu_max",
+                "theta_deg_max",
+                "r_min",
+                "r_max",
+                "n_theta",
+                "baseline_mode",
+                "bottom_q",
+                "use_sobel_mag",
+                "use_sobel_highpass",
+                "use_circular_roi",
+                "roi_radius_frac",
+            ]
+        else:
+            fieldnames = ["probe_angle_deg", "phi_star_deg", "alpha_star_deg",
+                          "score_lines", "peak_ratio", "rho_max", "rho_bins", "K"]
+            if use_E_asym:
+                fieldnames.append("E_asym")
+            if use_M_mono:
+                fieldnames.append("M_mono")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -582,16 +673,25 @@ def _adaptive_direction_search_on_frames(
     # 也打印一个简短汇总（前若干项）
     if verbose and len(probe_rows) > 0:
         top_num = top_k_candidates if top_k_candidates > 0 else len(probe_rows)
-        top = sorted(probe_rows, key=lambda d: (-d["score_lines"], d["probe_angle_deg"]))[:top_num]
-        print(f"[angles] Top-{len(top)} by score_lines:")
-        for r0 in top:
-            score_val = r0["score_lines"]
-            score_fmt = f"{score_val:.1f}" if edge_method == "sobel" else f"{int(round(score_val))}"
-            print(
-                f"  a={r0['probe_angle_deg']:+06.1f}° | score={score_fmt:>7} | "
-                f"φ*={r0['phi_star_deg']:6.1f}° | ρ_max={r0['rho_max']:3d} | "
-                f"ρ_bins={r0['rho_bins']:3d} | K={r0['K']}"
-            )
+        if direction_method == "autocorr":
+            top = sorted(probe_rows, key=lambda d: (-d["C"], d["probe_angle_deg"]))[:top_num]
+            print(f"[angles] Top-{len(top)} by C:")
+            for r0 in top:
+                print(
+                    f"  a={r0['probe_angle_deg']:+06.1f}° | C={r0['C']:.4f} | "
+                    f"mu_max={r0['mu_max']:.4f} | theta_mu={r0['theta_deg_max']:.1f}°"
+                )
+        else:
+            top = sorted(probe_rows, key=lambda d: (-d["score_lines"], d["probe_angle_deg"]))[:top_num]
+            print(f"[angles] Top-{len(top)} by score_lines:")
+            for r0 in top:
+                score_val = r0["score_lines"]
+                score_fmt = f"{score_val:.1f}" if edge_method == "sobel" else f"{int(round(score_val))}"
+                print(
+                    f"  a={r0['probe_angle_deg']:+06.1f}° | score={score_fmt:>7} | "
+                    f"φ*={r0['phi_star_deg']:6.1f}° | ρ_max={r0['rho_max']:3d} | "
+                    f"ρ_bins={r0['rho_bins']:3d} | K={r0['K']}"
+                )
 
     #
     return best
@@ -610,6 +710,7 @@ def adaptive_direction_search(video_path: str,
                               fft_half_width_deg: float = 4.0,
                               fft_rmin_ratio: float = 0.05,
                               fft_rmax_ratio: float = 1.0,
+                              direction_method: str = "hough",
                               vote_theta_res_deg: float = 0.5,
                               vote_k_ratio: float = 0.55,
                               vote_theta_range: Tuple[float, float] = (0.0, 180.0),
@@ -641,6 +742,7 @@ def adaptive_direction_search(video_path: str,
         fft_half_width_deg=fft_half_width_deg,
         fft_rmin_ratio=fft_rmin_ratio,
         fft_rmax_ratio=fft_rmax_ratio,
+        direction_method=direction_method,
         verbose=verbose,
         use_E_asym=use_E_asym,
         use_M_mono=use_M_mono,
@@ -718,6 +820,7 @@ def batch_probe_along_line(
     fft_half_width_deg: float,
     fft_rmin_ratio: float,
     fft_rmax_ratio: float,
+    direction_method: str,
     vote_theta_res_deg: float,
     vote_k_ratio: float,
     vote_theta_range: Tuple[float, float],
@@ -778,6 +881,7 @@ def batch_probe_along_line(
                 fft_half_width_deg=fft_half_width_deg,
                 fft_rmin_ratio=fft_rmin_ratio,
                 fft_rmax_ratio=fft_rmax_ratio,
+                direction_method=direction_method,
                 verbose=verbose,
                 use_E_asym=use_E_asym,
                 use_M_mono=use_M_mono,
