@@ -8,18 +8,18 @@ from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 t0 = time.perf_counter()
 # ========== 用户配置区（按需修改） ==========
-#VIDEO = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
-VIDEO = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
+VIDEO = r"D:\Programs\Python\stiv\stiv_adapt\data\CRR.MP4"
+#VIDEO = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 
-CENTER: Tuple[int, int] =(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
+CENTER: Tuple[int, int] =(1987, 570)#brj(2110,640) # ← 手动中心点（像素坐标）
 #多点测速参数
 USE_BATCH_LINE_PROBING = True # ← 开启多点测速
-BANK_POINT: Tuple[int, int] = (834,487)#(783, 577)#(533, 1120) # 岸边点（与 CENTER 组成测速直线）
+BANK_POINT: Tuple[int, int] =(783, 577)#brj(834,487)#(533, 1120) # 岸边点（与 CENTER 组成测速直线）
 PROBE_INTERVAL_PX = 200 # 两测点之间的像素间隔（从中心点向两端延伸）
 
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 256
-ANGLE_START, ANGLE_END, ANGLE_STEP =-95, -55, 0.1   # 遍历的“测速线角度”
+ANGLE_START, ANGLE_END, ANGLE_STEP =-110, -70, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 256
 USE_ROI = True
 ROI_RADIUS_FRAC: float = 0.9  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
@@ -28,7 +28,7 @@ VERBOSE = True
 # 对称性评分开关：True 时使用 E_asym 二次筛选最佳角度
 USE_E_ASYM: bool = False
 # 单调性评分开关：True 时启用 M_mono 判据（优先于对称性）
-USE_M_MONO: bool = True
+USE_M_MONO: bool = False
 # M_mono 单调性评分的峰值阈值比例（0~1）：越高越靠近峰顶
 M_MONO_PEAK_RATIO: float = 0.5
 # 角度候选的得分截取数量（默认取前10名）
@@ -55,7 +55,7 @@ FFT_RMAX_RATIO = 0.9
 FPS: Optional[float] = 23.976
 
 # 比例尺：二选一
-SCALE_M_PER_PIXEL: Optional[float] = None  # A) 直接给（m/px）；不想手填则设 None 走 B)
+SCALE_M_PER_PIXEL: Optional[float] = 0.018656072  # A) 直接给（m/px）；不想手填则设 None 走 B)
 CALIB_REAL_M: Optional[float] = 23.16     # B) 首帧两点标定（米）
 CALIB_LINE_XYXY: Optional[Tuple[int, int, int, int]] = (476, 835,3356, 809)#CRR(445, 1321, 3085, 1444)
 #投票霍夫的可调参数（法线角 θ 的设置）——
