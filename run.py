@@ -40,6 +40,8 @@ SCORE_MODE: str = "peak_votes"
 # 边缘提取方式：可选 "canny" 或 "sobel"
 EDGE_METHOD: str = "sobel"
 USE_SOBEL_HIGHPASS: bool = False  # True 表示使用高通+Sobel 梯度幅值
+# 测速线方向搜索方法：可选 "hough" 或 "autocorr"
+DIRECTION_METHOD: str = "hough"
 
 
 # 速度阈值设置（m/s），可按需修改；留 None 表示不限制
@@ -382,6 +384,7 @@ def main():
             fft_half_width_deg=FFT_HALF_DEG,
             fft_rmin_ratio=FFT_RMIN_RATIO,
             fft_rmax_ratio=FFT_RMAX_RATIO,
+            direction_method=DIRECTION_METHOD,
             use_E_asym=USE_E_ASYM,
             use_M_mono=USE_M_MONO,
             m_mono_peak_ratio=M_MONO_PEAK_RATIO,
@@ -415,7 +418,7 @@ def main():
         return
 
 
-    # 自适应方向搜索（内部：构建STI → 可选FFT扇形增强 → Canny → 角度投票霍夫）
+    # 自适应方向搜索（Hough 或自相关；由 DIRECTION_METHOD 控制）
     best = adaptive_direction_search(
         video_path=VIDEO,
         center=CENTER,
@@ -432,6 +435,7 @@ def main():
         fft_half_width_deg=FFT_HALF_DEG,
         fft_rmin_ratio=FFT_RMIN_RATIO,
         fft_rmax_ratio=FFT_RMAX_RATIO,
+        direction_method=DIRECTION_METHOD,
         verbose=VERBOSE,
         use_E_asym=USE_E_ASYM,
         use_M_mono=USE_M_MONO,
