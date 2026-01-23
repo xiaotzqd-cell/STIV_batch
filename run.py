@@ -39,7 +39,6 @@ K_SIGMA: float = 1
 SCORE_MODE: str = "peak_ratio"
 # 边缘提取方式：可选 "canny" 或 "sobel"
 EDGE_METHOD: str = "sobel"
-USE_SOBEL_HIGHPASS: bool = False  # True 表示使用高通+Sobel 梯度幅值
 # 测速线方向搜索方法：可选 "hough" 或 "autocorr"
 DIRECTION_METHOD: str = "autocorr"
 
@@ -47,11 +46,6 @@ DIRECTION_METHOD: str = "autocorr"
 V_MIN: Optional[float] = None
 V_MAX: Optional[float] = None
 
-# 频域扇形增强（用于评分）
-USE_FFT_FAN = False
-FFT_HALF_DEG = 4
-FFT_RMIN_RATIO = 0.15
-FFT_RMAX_RATIO = 0.9
 # 帧率（建议手动给准值；留 None 则使用视频元数据）
 FPS: Optional[float] = 23.976
 
@@ -376,11 +370,6 @@ def main():
             use_circular_roi=USE_ROI,
             roi_radius_frac=ROI_RADIUS_FRAC,
             edge_method=EDGE_METHOD,
-            use_sobel_highpass=USE_SOBEL_HIGHPASS,
-            use_fft_fan_filter=USE_FFT_FAN,
-            fft_half_width_deg=FFT_HALF_DEG,
-            fft_rmin_ratio=FFT_RMIN_RATIO,
-            fft_rmax_ratio=FFT_RMAX_RATIO,
             direction_method=DIRECTION_METHOD,
             use_E_asym=USE_E_ASYM,
             use_M_mono=USE_M_MONO,
@@ -427,11 +416,6 @@ def main():
         use_circular_roi=USE_ROI,
         roi_radius_frac=ROI_RADIUS_FRAC,
         edge_method=EDGE_METHOD,
-        use_sobel_highpass=USE_SOBEL_HIGHPASS,
-        use_fft_fan_filter=USE_FFT_FAN,
-        fft_half_width_deg=FFT_HALF_DEG,
-        fft_rmin_ratio=FFT_RMIN_RATIO,
-        fft_rmax_ratio=FFT_RMAX_RATIO,
         direction_method=DIRECTION_METHOD,
         verbose=VERBOSE,
         use_E_asym=USE_E_ASYM,

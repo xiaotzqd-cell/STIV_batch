@@ -10,7 +10,6 @@ import csv,os
 import pandas as pd
 from .core import (
     build_sti_from_frames,
-    enhance_sti_via_fft_fan,
     compute_canny_edges,
     push_debug_dir,
     DEBUG_RUN_DIR,
@@ -186,6 +185,38 @@ def _draw_line_overlay(sti_u8: np.ndarray,
     cv2.imwrite(path, vis)
 
 
+def _extract_peak_from_votes(
+    votes_filtered: np.ndarray,
+    theta_axis: np.ndarray,
+    score_mode: str,
+    *,
+    sum_votes: Optional[float] = None,
+) -> Dict[str, Any]:
+    """根据角度投票结果提取峰值信息与线方向参数。"""
+    if sum_votes is None:
+        sum_votes = float(votes_filtered.sum())
+
+    peak_idx = int(np.argmax(votes_filtered))
+    theta_normal_deg = float(theta_axis[peak_idx])
+    peak_votes = float(votes_filtered[peak_idx])
+    peak_ratio = peak_votes / (sum_votes + 1e-9)
+    alpha_deg = (theta_normal_deg + 90.0) % 180.0
+    tan_a = math.tan(math.radians(alpha_deg))
+    slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
+    score_for_rank = peak_ratio if score_mode == "peak_ratio" else peak_votes
+
+    return {
+        "peak_idx": peak_idx,
+        "theta_normal_deg": theta_normal_deg,
+        "peak_votes": peak_votes,
+        "peak_ratio": peak_ratio,
+        "alpha_deg": alpha_deg,
+        "slope": slope,
+        "score_for_rank": score_for_rank,
+        "sum_votes": float(sum_votes),
+    }
+
+
 def _load_video_frames(video_path: str, max_frames: int) -> Tuple[List[np.ndarray], float]:
     """读取视频帧并返回灰度帧列表及 FPS。"""
     cap = cv2.VideoCapture(video_path)
@@ -220,11 +251,6 @@ def _adaptive_direction_search_on_frames(
     use_circular_roi: bool,
     roi_radius_frac: float,
     edge_method: str,
-    use_sobel_highpass: bool,
-    use_fft_fan_filter: bool,
-    fft_half_width_deg: float,
-    fft_rmin_ratio: float,
-    fft_rmax_ratio: float,
     direction_method: str,
     verbose: bool,
     use_E_asym: bool,
@@ -254,7 +280,6 @@ def _adaptive_direction_search_on_frames(
         "score_mode": score_mode,
         "peak_votes": None,
         "peak_ratio": None,
-        "theta_fft": None,
         "sti_raw": None,
         "sti_filtered": None,
         "fps": fps,
@@ -289,7 +314,6 @@ def _adaptive_direction_search_on_frames(
 
             cfg = AutoCorrConfig(
                 use_sobel_mag=True,
-                use_sobel_highpass=use_sobel_highpass,
                 use_circular_roi=use_circular_roi,
                 roi_radius_frac=roi_radius_frac,
             )
@@ -317,7 +341,6 @@ def _adaptive_direction_search_on_frames(
                 "baseline_mode": str(cfg.baseline_mode),
                 "bottom_q": float(cfg.bottom_q),
                 "use_sobel_mag": bool(cfg.use_sobel_mag),
-                "use_sobel_highpass": bool(cfg.use_sobel_highpass),
                 "use_circular_roi": bool(cfg.use_circular_roi),
                 "roi_radius_frac": float(cfg.roi_radius_frac),
             }
@@ -343,23 +366,16 @@ def _adaptive_direction_search_on_frames(
                     angle=float(a), slope=slope, score=score_for_rank,
                     peak_votes=None,
                     peak_ratio=None,
-                    theta_fft=None, sti_raw=sti, angle_probe=a,
+                    sti_raw=sti, angle_probe=a,
                     E_asym=float("nan"), M_mono=float("nan"),
                 ))
         else:
-            sti_in = sti; theta_fft = None
-            if use_fft_fan_filter:
-                sti_in, theta_fft = enhance_sti_via_fft_fan(
-                    sti, half_width_deg=fft_half_width_deg,
-                    rmin_ratio=fft_rmin_ratio, rmax_ratio=fft_rmax_ratio
-                )
-            else:
-                _save_img("step1_sti_raw.png", sti)
+            sti_in = sti
+            _save_img("step1_sti_raw.png", sti)
 
             if edge_method == "sobel":
                 edges = compute_sobel_edges(
                     sti_in,
-                    use_highpass=use_sobel_highpass,
                     use_circular_roi=use_circular_roi,
                     roi_radius_frac=roi_radius_frac,
                     save_mag_name="step6_sobel_mag_tmp.png",
@@ -401,7 +417,8 @@ def _adaptive_direction_search_on_frames(
                 votes_full, theta_axis,
                 theta_range=vote_theta_range
             )
-            if votes_filtered.sum() <= 0:
+            sum_votes = float(votes_filtered.sum())
+            if sum_votes <= 0:
                 #
                 # 记录一行（无峰时，得分=0）
                 H, W = edges.shape[:2]
@@ -427,15 +444,19 @@ def _adaptive_direction_search_on_frames(
                 angle_times.append({"angle": float(a), "seconds": float(time.perf_counter() - t0)})
                 a += angle_step;continue
 
-            peak_idx = int(np.argmax(votes_filtered))
-            theta_normal_deg = float(theta_axis[peak_idx])
-            peak_votes = float(votes_filtered[peak_idx])        # = 该 θ 上的得分
-            sum_votes = float(votes_filtered.sum())
-            peak_ratio = peak_votes / (sum_votes + 1e-9)
-            alpha_deg = (theta_normal_deg + 90.0) % 180.0
-            tan_a = math.tan(math.radians(alpha_deg))
-            slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
-            score_for_rank = peak_ratio if score_mode == "peak_ratio" else peak_votes
+            peak_info = _extract_peak_from_votes(
+                votes_filtered,
+                theta_axis,
+                score_mode,
+                sum_votes=sum_votes,
+            )
+            peak_idx = peak_info["peak_idx"]
+            theta_normal_deg = peak_info["theta_normal_deg"]
+            peak_votes = peak_info["peak_votes"]
+            peak_ratio = peak_info["peak_ratio"]
+            alpha_deg = peak_info["alpha_deg"]
+            slope = peak_info["slope"]
+            score_for_rank = peak_info["score_for_rank"]
 
             E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
             M_mono = _compute_monotonicity_score(votes_filtered, peak_idx, m_mono_peak_ratio) if use_M_mono else float("nan")
@@ -498,7 +519,7 @@ def _adaptive_direction_search_on_frames(
                     angle=alpha_deg, slope=slope, score=score_for_rank,
                     peak_votes=peak_votes,
                     peak_ratio=peak_ratio,
-                    theta_fft=theta_fft, sti_raw=sti, angle_probe=a,
+                    sti_raw=sti, angle_probe=a,
                     E_asym=E_asym, M_mono=M_mono,
                 ))
         a += angle_step
@@ -538,18 +559,9 @@ def _adaptive_direction_search_on_frames(
         a_best = best.get("angle_probe", angle_start)
         sti_best = build_sti_from_frames(frames, center, length_px, angle_deg=a_best)
         best["sti_raw"] = sti_best
-        filtered_best = None
-        if use_fft_fan_filter and sti_best is not None:
-            filtered_best, theta_fft = enhance_sti_via_fft_fan(
-                sti_best, half_width_deg=fft_half_width_deg,
-                rmin_ratio=fft_rmin_ratio, rmax_ratio=fft_rmax_ratio
-            )
-            best["theta_fft"] = theta_fft
-            best["sti_filtered"] = filtered_best
         if edge_method == "sobel":
             edges_best = compute_sobel_edges(
                 sti_best,
-                use_highpass=use_sobel_highpass,
                 use_circular_roi=use_circular_roi,
                 roi_radius_frac=roi_radius_frac,
                 save_mag_name="step6_sobel_mag.png",
@@ -586,16 +598,21 @@ def _adaptive_direction_search_on_frames(
             theta_range=vote_theta_range
         )
 
-        if votes_filtered.sum() > 0:
-            peak_idx = int(np.argmax(votes_filtered))
-            theta_normal_deg = float(theta_axis[peak_idx])
-            peak_votes = float(votes_filtered[peak_idx])
-            sum_votes = float(votes_filtered.sum())
-            peak_ratio = peak_votes / (sum_votes + 1e-9)
-            alpha_deg = (theta_normal_deg + 90.0) % 180.0
-            tan_a = math.tan(math.radians(alpha_deg))
-            slope = None if abs(tan_a) < 1e-9 else (1.0 / tan_a)
-            score_for_rank = peak_ratio if score_mode == "peak_ratio" else peak_votes
+        sum_votes = float(votes_filtered.sum())
+        if sum_votes > 0:
+            peak_info = _extract_peak_from_votes(
+                votes_filtered,
+                theta_axis,
+                score_mode,
+                sum_votes=sum_votes,
+            )
+            peak_idx = peak_info["peak_idx"]
+            theta_normal_deg = peak_info["theta_normal_deg"]
+            peak_votes = peak_info["peak_votes"]
+            peak_ratio = peak_info["peak_ratio"]
+            alpha_deg = peak_info["alpha_deg"]
+            slope = peak_info["slope"]
+            score_for_rank = peak_info["score_for_rank"]
 
             E_asym = _compute_symmetry_score(votes_filtered, peak_idx) if use_E_asym else float("nan")
             M_mono = _compute_monotonicity_score(votes_filtered, peak_idx, m_mono_peak_ratio) if use_M_mono else float("nan")
@@ -648,7 +665,6 @@ def _adaptive_direction_search_on_frames(
                 "baseline_mode",
                 "bottom_q",
                 "use_sobel_mag",
-                "use_sobel_highpass",
                 "use_circular_roi",
                 "roi_radius_frac",
             ]
@@ -705,11 +721,6 @@ def adaptive_direction_search(video_path: str,
                               use_circular_roi: bool = False,
                               roi_radius_frac: float = 1.0,
                               edge_method: str = "canny",
-                              use_sobel_highpass: bool = False,
-                              use_fft_fan_filter: bool = True,
-                              fft_half_width_deg: float = 4.0,
-                              fft_rmin_ratio: float = 0.05,
-                              fft_rmax_ratio: float = 1.0,
                               direction_method: str = "hough",
                               vote_theta_res_deg: float = 0.5,
                               vote_k_ratio: float = 0.55,
@@ -737,11 +748,6 @@ def adaptive_direction_search(video_path: str,
         use_circular_roi=use_circular_roi,
         roi_radius_frac=roi_radius_frac,
         edge_method=edge_method,
-        use_sobel_highpass=use_sobel_highpass,
-        use_fft_fan_filter=use_fft_fan_filter,
-        fft_half_width_deg=fft_half_width_deg,
-        fft_rmin_ratio=fft_rmin_ratio,
-        fft_rmax_ratio=fft_rmax_ratio,
         direction_method=direction_method,
         verbose=verbose,
         use_E_asym=use_E_asym,
@@ -815,11 +821,6 @@ def batch_probe_along_line(
     use_circular_roi: bool,
     roi_radius_frac: float,
     edge_method: str,
-    use_sobel_highpass: bool,
-    use_fft_fan_filter: bool,
-    fft_half_width_deg: float,
-    fft_rmin_ratio: float,
-    fft_rmax_ratio: float,
     direction_method: str,
     vote_theta_res_deg: float,
     vote_k_ratio: float,
@@ -876,11 +877,6 @@ def batch_probe_along_line(
                 use_circular_roi=use_circular_roi,
                 roi_radius_frac=roi_radius_frac,
                 edge_method=edge_method,
-                use_sobel_highpass=use_sobel_highpass,
-                use_fft_fan_filter=use_fft_fan_filter,
-                fft_half_width_deg=fft_half_width_deg,
-                fft_rmin_ratio=fft_rmin_ratio,
-                fft_rmax_ratio=fft_rmax_ratio,
                 direction_method=direction_method,
                 verbose=verbose,
                 use_E_asym=use_E_asym,
