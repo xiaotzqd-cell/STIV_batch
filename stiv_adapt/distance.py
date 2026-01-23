@@ -23,6 +23,7 @@ orig_img = None
 disp_img = None
 
 def fit_to_window(w, h, max_w, max_h):
+    """计算适配窗口的缩放比例。"""
     sx = max_w / float(w)
     sy = max_h / float(h)
     return min(1.0, sx, sy)
@@ -34,6 +35,7 @@ def to_orig(pt_disp):
     return (x, y)
 
 def on_mouse(event, x, y, flags, param):
+    """鼠标回调：记录或清空标定点。"""
     global points, disp_img
     if event == cv2.EVENT_LBUTTONDOWN:
         if len(points) < 2:

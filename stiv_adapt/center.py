@@ -19,6 +19,7 @@ disp = cv2.resize(img,
                   )
 
 def mouse_callback(event, x, y, flags, param):
+    """鼠标回调：记录点击的原图坐标。"""
     if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
         # 转换回原图坐标
         orig_x = int(round(x / scale))
@@ -27,6 +28,7 @@ def mouse_callback(event, x, y, flags, param):
 
 
 def redraw(window_name: str, pts):
+    """根据选点重绘缩放窗口。"""
     canvas = disp.copy()
     for i, (ox, oy) in enumerate(pts, 1):
         dx = int(round(ox * scale))
@@ -58,4 +60,3 @@ if selected_points:
         print(f"  #{idx}: ({ox}, {oy})")
 else:
     print("未选择任何点")
-

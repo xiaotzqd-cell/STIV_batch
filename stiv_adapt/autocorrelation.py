@@ -120,6 +120,7 @@ def angular_response_mu_fast(R: np.ndarray, cfg: AutoCorrConfig) -> Tuple[np.nda
 
 
 def _compute_baseline(mu: np.ndarray, cfg: AutoCorrConfig) -> float:
+    """按配置计算 mu 的基线值。"""
     if cfg.baseline_mode == "min":
         return float(np.min(mu))
     if cfg.baseline_mode == "median":
