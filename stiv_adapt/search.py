@@ -264,6 +264,7 @@ def _adaptive_direction_search_on_frames(
     top_k_candidates: int,
     score_mode: str,
 ) -> Dict[str, Any]:
+    """在给定帧序列上执行方向搜索并返回最佳结果。"""
     probe_rows: List[Dict[str, Any]] = []
     candidates: List[Dict[str, Any]] = []
     t_total0 = time.perf_counter()
@@ -529,6 +530,7 @@ def _adaptive_direction_search_on_frames(
         top_candidates = sorted(candidates, key=lambda d: (-d["score"], d["angle_probe"]))[:k]
         if use_M_mono:
             def _mono_key(c: Dict[str, Any]):
+                """为单调性优先策略生成排序键。"""
                 mono = c.get("M_mono", float("nan"))
                 mono_val = -math.inf if math.isnan(mono) else mono
                 return (mono_val, c["score"], -c["angle_probe"])
@@ -536,6 +538,7 @@ def _adaptive_direction_search_on_frames(
             chosen = max(top_candidates, key=_mono_key)
         elif use_E_asym:
             def _asym_key(c: Dict[str, Any]):
+                """为对称性优先策略生成排序键。"""
                 asym = c.get("E_asym", float("nan"))
                 return (math.inf if math.isnan(asym) else asym, -c["score"], c["angle_probe"])
 
@@ -735,6 +738,7 @@ def adaptive_direction_search(video_path: str,
                               k_sigma: float = 1.0,
                               score_mode: str = "peak_votes",
                               ) -> Dict[str, Any]:
+    """读取视频并执行自适应方向搜索。"""
     frames, fps = _load_video_frames(video_path, max_frames)
 
     return _adaptive_direction_search_on_frames(

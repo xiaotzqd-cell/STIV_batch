@@ -21,8 +21,10 @@ from stiv_adapt.vote_accumulator import hough_angle_voting_min  # 绝对导入�
 # === 输出目录管理 ===
 DEBUG_RUN_DIR: Optional[str] = None
 def _ensure_dir(p: str):
+    """确保目录存在。"""
     os.makedirs(p, exist_ok=True)
 def init_debug_dir(base: str = "out", tag: str = "") -> str:
+    """初始化调试输出目录并返回路径。"""
     global DEBUG_RUN_DIR
     t = time.strftime("%Y%m%d-%H%M%S")
     name = f"{t}{('-' + tag) if tag else ''}"
@@ -46,6 +48,7 @@ def push_debug_dir(suffix: str):
     finally:
         DEBUG_RUN_DIR = prev
 def _save_img(name: str, img: np.ndarray) -> str:
+    """保存调试图片并返回保存路径。"""
     if DEBUG_RUN_DIR is None:
         init_debug_dir()
     path = os.path.join(DEBUG_RUN_DIR, name)
@@ -66,6 +69,7 @@ def _save_img(name: str, img: np.ndarray) -> str:
 
 # === STI 构建 ===
 def _line_sample_maps(center: Tuple[int, int], length_px: int, angle_deg: float) -> Tuple[np.ndarray, np.ndarray]:
+    """生成采样线的 remap 坐标映射。"""
     cx, cy = center
     half = length_px / 2.0
     theta = math.radians(angle_deg)
@@ -77,6 +81,7 @@ def _line_sample_maps(center: Tuple[int, int], length_px: int, angle_deg: float)
 
 def build_sti_from_frames(frames_gray: List[np.ndarray], center: Tuple[int, int],
                           length_px: int, angle_deg: float) -> Optional[np.ndarray]:
+    """从帧序列构建 STI 图像。"""
     if len(frames_gray) == 0: return None
     map_x, map_y = _line_sample_maps(center, length_px, angle_deg)
     rows = []
@@ -87,6 +92,7 @@ def build_sti_from_frames(frames_gray: List[np.ndarray], center: Tuple[int, int]
     return np.clip(sti, 0, 255).astype(np.uint8)
 
 def _angdiff_deg(a, b):
+    """计算两个角度的最小差值（度）。"""
     d = abs(a - b)
     return min(d, 180.0 - d)
 
@@ -107,6 +113,7 @@ def compute_canny_edges(sti_u8: np.ndarray,
                         save_name: str = "step7_canny_edges.png",
                         pre_canny_save_name: Optional[str] = "step6_pre_canny_eq_blur.png",
                         verbose: bool = False) -> np.ndarray:
+    """对 STI 图像执行 Canny 边缘检测。"""
     H, W = sti_u8.shape[:2]
     eq   = cv2.equalizeHist(sti_u8)
     blur = cv2.GaussianBlur(eq, (5, 5), 0)

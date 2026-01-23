@@ -21,6 +21,7 @@ def hough_angle_voting_min(
     k_ratio: float = 0.55,
     verbose: bool = True,
 ) -> Tuple[int, List[Tuple[float, int]], np.ndarray, np.ndarray, int, Dict[str, float]]:
+    """执行最小霍夫角度投票并返回统计结果。"""
     assert edge_u8.ndim == 2 and edge_u8.dtype == np.uint8, "edge image must be single-channel uint8"
     H, W = edge_u8.shape
 
@@ -96,4 +97,3 @@ def hough_angle_voting_min(
         print(f"[RESULT] total_lines(sum over θ of ≥K ρ-bins)={total_lines}")
 
     return total_lines, angle_votes, votes_per_theta, theta_axis, rho_max, best_info
-

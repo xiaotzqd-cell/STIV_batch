@@ -145,6 +145,7 @@ def save_flow_overlay(
 
     # —— 左上角信息：slope / m/px / FPS / v(m/s) ——
     def put(line, row):
+        """在叠加图左上角写入一行文本。"""
         y = 35 + row*30
         cv2.putText(frame, line, (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (20,20,20), 3, cv2.LINE_AA)
         cv2.putText(frame, line, (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2, cv2.LINE_AA)
@@ -336,6 +337,7 @@ def save_batch_overlays(
 
 
 def main():
+    """程序入口，执行测速流程。"""
     if not os.path.isfile(VIDEO):
         raise FileNotFoundError(f"视频不存在: {VIDEO}")
 
