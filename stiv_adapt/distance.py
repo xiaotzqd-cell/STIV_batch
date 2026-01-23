@@ -10,7 +10,7 @@ import math
 import json
 import time
 # ====== 配置区 ======
-IMAGE_PATH = r"D:\Programs\Python\stiv\stiv_adapt\data\CRR_calibration_image.jpg"
+IMAGE_PATH = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ_calibration_image.jpg"
 #IMAGE_PATH = r"D:\PycharmProjects\River_redio\BRJ_calibration_image.jpg"#新电脑
 REAL_DISTANCE_M = 49.38   # 两岸真实距离 (米)
 OUT_DIR = os.path.join(os.path.dirname(__file__), "out_calib")

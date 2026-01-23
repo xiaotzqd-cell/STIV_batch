@@ -243,7 +243,7 @@ def _adaptive_direction_search_on_frames(
     t_total0 = time.perf_counter()
     angle_times: List[Dict[str, float]] = []
 
-    score_mode = (score_mode or "peak_votes").strip().lower()
+    score_mode = (score_mode or "peak_votes").strip().lower()   #峰值和峰值占比选择
     if score_mode not in {"peak_votes", "peak_ratio"}:
         score_mode = "peak_votes"
 

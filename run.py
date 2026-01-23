@@ -8,18 +8,18 @@ from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 t0 = time.perf_counter()
 # ========== 用户配置区（按需修改） ==========
-VIDEO = r"D:\Programs\Python\stiv\stiv_adapt\data\CRR.MP4"
+VIDEO = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
 #VIDEO = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 
-CENTER: Tuple[int, int] =(1987, 570)#brj(2110,640) # ← 手动中心点（像素坐标）
+CENTER: Tuple[int, int] =(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
 #多点测速参数
 USE_BATCH_LINE_PROBING = True # ← 开启多点测速
-BANK_POINT: Tuple[int, int] =(783, 577)#brj(834,487)#(533, 1120) # 岸边点（与 CENTER 组成测速直线）
+BANK_POINT: Tuple[int, int] =(834,487)#CRR(783, 577)#(533, 1120) # 岸边点（与 CENTER 组成测速直线）
 PROBE_INTERVAL_PX = 200 # 两测点之间的像素间隔（从中心点向两端延伸）
 
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 256
-ANGLE_START, ANGLE_END, ANGLE_STEP =-110, -70, 1   # 遍历的“测速线角度”
+ANGLE_START, ANGLE_END, ANGLE_STEP =-90, -60, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 256
 USE_ROI = True
 ROI_RADIUS_FRAC: float = 0.9  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
@@ -32,21 +32,20 @@ USE_M_MONO: bool = False
 # M_mono 单调性评分的峰值阈值比例（0~1）：越高越靠近峰顶
 M_MONO_PEAK_RATIO: float = 0.5
 # 角度候选的得分截取数量（默认取前10名）
-TOP_K_CANDIDATES: int = 4
+TOP_K_CANDIDATES: int = 3
 # Sobel 得分阈值系数（thr = mu + k_sigma * sigma）
 K_SIGMA: float = 1
 # 最佳测速线方向选择策略：peak_votes / peak_ratio
-SCORE_MODE: str = "peak_votes"
+SCORE_MODE: str = "peak_ratio"
 # 边缘提取方式：可选 "canny" 或 "sobel"
 EDGE_METHOD: str = "sobel"
 USE_SOBEL_HIGHPASS: bool = False  # True 表示使用高通+Sobel 梯度幅值
 # 测速线方向搜索方法：可选 "hough" 或 "autocorr"
-DIRECTION_METHOD: str = "hough"
-
+DIRECTION_METHOD: str = "autocorr"
 
 # 速度阈值设置（m/s），可按需修改；留 None 表示不限制
-V_MIN: Optional[float] = 0.5
-V_MAX: Optional[float] = 60
+V_MIN: Optional[float] = None
+V_MAX: Optional[float] = None
 
 # 频域扇形增强（用于评分）
 USE_FFT_FAN = False
@@ -57,7 +56,7 @@ FFT_RMAX_RATIO = 0.9
 FPS: Optional[float] = 23.976
 
 # 比例尺：二选一
-SCALE_M_PER_PIXEL: Optional[float] = 0.018656072  # A) 直接给（m/px）；不想手填则设 None 走 B)
+SCALE_M_PER_PIXEL: Optional[float] = None  # A) 直接给（m/px）；不想手填则设 None 走 B)
 CALIB_REAL_M: Optional[float] = 23.16     # B) 首帧两点标定（米）
 CALIB_LINE_XYXY: Optional[Tuple[int, int, int, int]] = (476, 835,3356, 809)#CRR(445, 1321, 3085, 1444)
 #投票霍夫的可调参数（法线角 θ 的设置）——
@@ -71,7 +70,7 @@ def compute_scale_from_first_frame(video_path: str,
     """在视频首帧上用两点像素距离和真实距离求 m/px。"""
     cap = cv2.VideoCapture(video_path)
     ok, frame0 = cap.read()
-    cap.release()
+    cap.release()#确保视频可以读取
     if not ok:
         raise RuntimeError("无法读取视频首帧用于标定")
     x1, y1, x2, y2 = xyxy
@@ -82,13 +81,10 @@ def compute_scale_from_first_frame(video_path: str,
     print(f"[calib] 像素距离={px:.2f}px, 真实距离={real_meters:.3f}m -> SCALE_M_PER_PIXEL={m_per_px:.6f} m/px")
     return m_per_px
 
-
 def _is_speed_out_of_range(speed: Optional[float]) -> bool:
     """依据 V_MIN/V_MAX 判断速度是否超出允许范围（按绝对值比较）。"""
-
     if speed is None:
         return False
-
     abs_speed = abs(speed)
     if V_MIN is not None and abs_speed < V_MIN:
         return True
@@ -96,12 +92,12 @@ def _is_speed_out_of_range(speed: Optional[float]) -> bool:
         return True
     return False
 
-
 def _line_endpoints(center, length_px, angle_deg):
+    """"根据中心点和线长度，计算两端点坐标和方向向量"""
     cx, cy = center
     half = length_px / 2.0
-    rad  = math.radians(angle_deg)
-    dx, dy = math.cos(rad), math.sin(rad)
+    rad  = math.radians(angle_deg)#转弧度
+    dx, dy = math.cos(rad), math.sin(rad)#单位方向向量
     x1 = int(round(cx - half*dx)); y1 = int(round(cy - half*dy))
     x2 = int(round(cx + half*dx)); y2 = int(round(cy + half*dy))
     return (x1, y1, x2, y2), (dx, dy)
@@ -121,6 +117,7 @@ def save_flow_overlay(
     filename: str="frame_overlay.png",
     preview_max_side: int=1280
 ):
+    """读取首帧，叠加测速线"""
     cap = cv2.VideoCapture(video_path)
     ok, frame = cap.read()
     cap.release()
