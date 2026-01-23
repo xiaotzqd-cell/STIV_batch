@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-core.py — STI 的构建、FFT 扇形滤波增强、以及 Canny+Hough 评分
+core.py — STI 的构建与 Canny+Hough 评分
 每个关键步骤都会保存调试图片到 DEBUG_RUN_DIR。
 """
 import os, math, time
@@ -11,8 +11,6 @@ from contextlib import contextmanager
 
 import cv2
 import numpy as np
-
-from stiv_adapt.sobel import compute_sobel_edges
 
 if __package__ in (None, ""):
     # 允许直接运行本文件时找到顶层 stiv_adapt 包
@@ -87,99 +85,6 @@ def build_sti_from_frames(frames_gray: List[np.ndarray], center: Tuple[int, int]
         rows.append(row)
     sti = np.vstack(rows)  # (T, W)
     return np.clip(sti, 0, 255).astype(np.uint8)
-
-# === 频域增强 ===
-def apply_hann_to_sti(sti_u8: np.ndarray) -> np.ndarray:
-    assert sti_u8.ndim == 2
-    H, W = sti_u8.shape
-    f = sti_u8.astype(np.float32) / 255.0
-    wy = 0.5 * (1.0 - np.cos(2.0 * np.pi * np.arange(H) / max(H - 1, 1)))
-    wx = 0.5 * (1.0 - np.cos(2.0 * np.pi * np.arange(W) / max(W - 1, 1)))
-    win2d = np.outer(wy, wx).astype(np.float32)
-    win_img = f * win2d
-    _save_img("step2_hann_windowed.png", win_img)
-    return win_img
-
-def fft2_on_sti(win32: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    F = np.fft.fft2(win32); F_shift = np.fft.fftshift(F)
-    mag = np.abs(F_shift).astype(np.float32)
-    mag_log = np.log1p(mag)
-    mag_u8 = np.clip(mag_log / mag_log.max() * 255, 0, 255).astype(np.uint8)
-    _save_img("step3_fft_magnitude.png", mag_u8)
-    return F_shift.astype(np.complex64), mag
-
-def _polar_energy_max_angle(mag: np.ndarray, num_angles: int = 180,
-                            rmin_ratio: float = 0.05, rmax_ratio: float = 1.0) -> float:
-    H, W = mag.shape
-    cy, cx = (H - 1) / 2.0, (W - 1) / 2.0
-    rmax = 0.5 * min(H, W) * rmax_ratio
-    rmin = 0.5 * min(H, W) * rmin_ratio
-    yy, xx = np.indices(mag.shape)
-    dy = yy - cy; dx = xx - cx
-    rr = np.hypot(dy, dx)
-    ang = (np.rad2deg(np.arctan2(dy, dx)) + 180.0) % 180.0
-    mask = (rr >= rmin) & (rr <= rmax)
-    hist_bins = np.linspace(0.0, 180.0, num_angles + 1, endpoint=True)
-    hist, _ = np.histogram(ang[mask], bins=hist_bins, weights=mag[mask])
-    k = int(hist.argmax())
-    a0 = (hist_bins[k] + hist_bins[k + 1]) * 0.5
-    mag_log = np.log1p(mag)
-    vis = (mag_log / mag_log.max() * 255.0).astype(np.uint8)
-    vis_bgr = cv2.cvtColor(vis, cv2.COLOR_GRAY2BGR)
-    length = int(0.45 * min(H, W))
-    rad = math.radians(a0)
-    x1 = int(cx - length * math.cos(rad)); y1 = int(cy - length * math.sin(rad))
-    x2 = int(cx + length * math.cos(rad)); y2 = int(cy + length * math.sin(rad))
-    cv2.line(vis_bgr, (x1, y1), (x2, y2), (0, 255, 0), 2, cv2.LINE_AA)
-    cv2.putText(vis_bgr, f"theta_fft={a0:.1f} deg", (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
-    _save_img("step3b_fft_with_main_direction.png", vis_bgr)
-    return float(a0)
-
-def make_fan_mask(shape: Tuple[int, int], center: Tuple[float, float],
-                  angle_deg: float, half_width_deg: float = 4.0,
-                  rmin_ratio: float = 0.05, rmax_ratio: float = 1.0) -> np.ndarray:
-    H, W = shape
-    cy, cx = center
-    yy, xx = np.indices((H, W))
-    dy = yy - cy; dx = xx - cx
-    rr = np.hypot(dy, dx)
-    ang = (np.rad2deg(np.arctan2(dy, dx)) + 180.0) % 180.0
-    da = np.abs(ang - angle_deg); da = np.minimum(da, 180.0 - da)
-    rmax = 0.5 * min(H, W) * rmax_ratio
-    rmin = 0.5 * min(H, W) * rmin_ratio
-    mask = (da <= half_width_deg) & (rr >= rmin) & (rr <= rmax)
-    mask_f32 = mask.astype(np.float32)
-    _save_img("step4_fan_mask.png", mask_f32)
-    return mask_f32
-
-def ifft_to_spatial(F_shift: np.ndarray) -> np.ndarray:
-    F = np.fft.ifftshift(F_shift)
-    f = np.fft.ifft2(F)
-    real = np.real(f).astype(np.float32)
-    u8 = np.zeros_like(real, dtype=np.uint8)
-    mn, mx = float(real.min()), float(real.max())
-    if mx - mn > 1e-9:
-        u8 = np.clip((real - mn) / (mx - mn) * 255.0, 0, 255).astype(np.uint8)
-    _save_img("step6_sti_filtered.png", u8)
-    return u8
-
-def enhance_sti_via_fft_fan(sti_u8: np.ndarray,
-                            half_width_deg: float = 4.0,
-                            rmin_ratio: float = 0.05,
-                            rmax_ratio: float = 1.0) -> Tuple[np.ndarray, float]:
-    _save_img("step1_sti_raw.png", sti_u8)
-    win = apply_hann_to_sti(sti_u8)
-    F_shift, mag = fft2_on_sti(win)
-    theta_fft = _polar_energy_max_angle(mag, num_angles=180, rmin_ratio=rmin_ratio, rmax_ratio=rmax_ratio)
-    center = ((mag.shape[0] - 1) / 2.0, (mag.shape[1] - 1) / 2.0)
-    mask = make_fan_mask(mag.shape, center, theta_fft, half_width_deg=half_width_deg,
-                         rmin_ratio=rmin_ratio, rmax_ratio=rmax_ratio)
-    F_filt = F_shift * mask
-    mag_masked = np.abs(F_filt).astype(np.float32)
-    _save_img("step5_fft_magnitude_masked.png", np.log1p(mag_masked))
-    filtered = ifft_to_spatial(F_filt)
-    return filtered, theta_fft
 
 def _angdiff_deg(a, b):
     d = abs(a - b)

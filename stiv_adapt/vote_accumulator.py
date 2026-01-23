@@ -12,7 +12,6 @@ vote_accumulator.py — 角度投票统计（论文口径，固定双线性入�
 
 from typing import Tuple, List, Dict
 import numpy as np
-import cv2
 
 
 def hough_angle_voting_min(
@@ -97,70 +96,4 @@ def hough_angle_voting_min(
         print(f"[RESULT] total_lines(sum over θ of ≥K ρ-bins)={total_lines}")
 
     return total_lines, angle_votes, votes_per_theta, theta_axis, rho_max, best_info
-
-# ===== 测试入口 =============================================
-def quick_test(
-    edge_path=None,
-    edge_u8: np.ndarray | None = None,
-    theta_res_deg: float = 1.0,
-    rho_step: float = 1.0,
-    k_ratio: float = 0.55,
-    save_csv: bool = False,
-    verbose: bool = True,
-):
-    """
-    直接在代码里调用的测试入口（不使用命令行）。
-    用法1：传 edge_path（单通道Canny图路径）
-    用法2：传 edge_u8 （已经是 uint8 的Canny边缘图）
-
-    返回：(total_lines, angle_votes, votes_per_theta, theta_axis, rho_max, best_info)
-    """
-    if edge_u8 is None:
-        if edge_path is None:
-            raise ValueError("请提供 edge_path 或 edge_u8 其中之一")
-        img = cv2.imread(edge_path, cv2.IMREAD_GRAYSCALE)
-        if img is None:
-            raise FileNotFoundError(edge_path)
-        edge_u8 = img
-
-    total, angle_votes, votes_full, theta_axis, rho_max, best = hough_angle_voting_min(
-        edge_u8,
-        theta_res_deg=theta_res_deg,
-        rho_step=rho_step,
-        k_ratio=k_ratio,
-        verbose=verbose,
-    )
-
-    if verbose and len(angle_votes) > 0:
-        top = sorted(angle_votes, key=lambda x: (-x[1], x[0]))[:10]
-        print(f"[RESULT] 角度得分 Top-{len(top)}（θ为法线角；votes=该θ上≥K的ρ-bin个数）:")
-        for ang, v in top:
-            print(f"  θ = {ang:6.2f}°, votes = {v:5d}")
-
-    if save_csv:
-        try:
-            import pandas as pd
-            arr = np.stack([theta_axis, votes_full], axis=1)
-            df = pd.DataFrame(arr, columns=["theta_deg", "votes(>=K rho-bins)"])
-            df.to_csv("theta_votes.csv", index=False, float_format="%.6f")
-            if verbose:
-                print("[RESULT] 已保存 θ-得分 表到: theta_votes.csv")
-        except Exception as e:
-            if verbose:
-                print(f"[WARN] 保存CSV失败：{e}")
-
-    return total, angle_votes, votes_full, theta_axis, rho_max, best
-
-
-# 可选：直接点“运行”也能跑（不依赖 sys.argv）
-if __name__ == "__main__":
-    # 默认尝试当前目录下的临时边缘图；你可以改成自己的路径
-    default_path = r"D:\Programs\Python\stiv\out\20251027-193952-stiv-accu-vote\step7_canny_edges.png"
-    try:
-        quick_test(edge_path=default_path, theta_res_deg=1.0, rho_step=1.0, k_ratio=0.55,
-                   save_csv=True, verbose=True)
-    except Exception as e:
-        print(f"[SELFTEST] 无法读取 {default_path}，请在 quick_test(edge_path=...) 里改成你的边缘图路径。错误：{e}")
-
-
 

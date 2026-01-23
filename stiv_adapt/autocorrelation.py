@@ -21,7 +21,6 @@ class AutoCorrConfig:
 
     # ——与原测流 sobel 口径对齐的预处理选项——
     use_sobel_mag: bool = False         # True: autocorr 输入用 J（sobel.py 生成）
-    use_sobel_highpass: bool = False    # True: 用 build_J2_highpass_grad；False: build_J1_grad_mag
     use_circular_roi: bool = False      # True: 对 J 应用圆形 ROI
     roi_radius_frac: float = 1.0        # ROI 半径比例
 
@@ -41,16 +40,12 @@ def _prepare_input_image(sti: np.ndarray, cfg: AutoCorrConfig) -> np.ndarray:
     # 确保输入 sobel.py 的是 uint8
     sti_u8 = sti.astype(np.uint8, copy=False)
 
-    if cfg.use_sobel_highpass:
-        J = sobel.build_J2_highpass_grad(sti_u8)     # uint8 0..255（口径与原测流一致）
-    else:
-        J = sobel.build_J1_grad_mag(sti_u8)          # uint8 0..255（口径与原测流一致）
+    J = sobel.build_J1_grad_mag(sti_u8)          # uint8 0..255（口径与原测流一致）
 
     if cfg.use_circular_roi:
         mask = sobel.build_circular_roi_mask(J.shape, radius_frac=float(cfg.roi_radius_frac))
-        J2 = J.copy()
-        J2[~mask] = 0
-        J = J2
+        J = J.copy()
+        J[~mask] = 0
 
     return J.astype(np.float64, copy=False)
 

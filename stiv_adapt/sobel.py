@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-sobel.py — 使用 Sobel 算子计算 STI 边缘/梯度图。
-按照用户提供的实现：可直接计算梯度幅值，或先做大尺度高斯高通后再算梯度。
+sobel.py — 使用 Sobel 算子计算 STI 边缘/梯度图（J1 直接梯度幅值）。
 """
 
 import cv2
@@ -24,24 +23,6 @@ def build_J1_grad_mag(img: np.ndarray) -> np.ndarray:
     # 归一化到 0~255
     J1 = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
     return J1.astype(np.uint8)
-
-
-def build_J2_highpass_grad(img: np.ndarray, sigma: float = 9.0) -> np.ndarray:
-    """方法2：先去除慢变化背景，再计算梯度幅值。"""
-    # 大尺度高斯模糊作为背景
-    blur = cv2.GaussianBlur(img, (0, 0), sigmaX=sigma, sigmaY=sigma)
-    # 高频分量（原图减去背景）
-    high = img.astype(np.float32) - blur.astype(np.float32)
-    # 高频归一化到 0~255，避免幅值过小
-    high_norm = cv2.normalize(high, None, 0, 255, cv2.NORM_MINMAX)
-
-    # 在高频图上计算梯度
-    gx = cv2.Sobel(high_norm, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(high_norm, cv2.CV_32F, 0, 1, ksize=3)
-    mag = cv2.magnitude(gx, gy)
-    # 再次归一化到 0~255
-    J2 = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
-    return J2.astype(np.uint8)
 
 
 def build_circular_roi_mask(shape: tuple[int, int], radius_frac: float = 0.9) -> np.ndarray:
@@ -224,23 +205,19 @@ def _save_img_safe(name: str, img: np.ndarray) -> None:
 
 
 def compute_sobel_edges(sti_u8: np.ndarray,
-                        use_highpass: bool = False,
                         use_circular_roi: bool = False,
                         roi_radius_frac: float = 1.0,
                         save_mag_name: str = "step6_sobel_mag.png",
                         save_edge_name: str = "step7_sobel_edges.png",
                         verbose: bool = False) -> np.ndarray:
     """
-    计算 Sobel 梯度幅值图；可选择直接梯度（J1）或高通后梯度（J2）。
+    计算 Sobel 梯度幅值图（J1）。
     返回的 edges 为 0~255 的 8 位图，可直接进入后续霍夫统计。
     """
     if sti_u8.ndim != 2:
         raise ValueError("Sobel 仅支持单通道灰度图")
 
-    if use_highpass:
-        mag = build_J2_highpass_grad(sti_u8)
-    else:
-        mag = build_J1_grad_mag(sti_u8)
+    mag = build_J1_grad_mag(sti_u8)
 
     # ROI 掩膜：可选，将圆外区域置零
     if use_circular_roi:
@@ -254,8 +231,7 @@ def compute_sobel_edges(sti_u8: np.ndarray,
     _save_img_safe(save_edge_name, edges)
 
     if verbose:
-        method = "J2 高通+梯度" if use_highpass else "J1 直接梯度"
         roi_info = f"roi=圆形(r={roi_radius_frac:.2f})" if use_circular_roi else "roi=无"
-        print(f"[sobel] {method}, {roi_info}, 输出已保存")
+        print(f"[sobel] J1 直接梯度, {roi_info}, 输出已保存")
 
     return edges
