@@ -261,6 +261,7 @@ def _adaptive_direction_search_on_frames(
     vote_theta_range: Tuple[float, float],
     k_sigma: float,
     save_candidate_overlays: bool,
+    save_all_sti: bool,
     top_k_candidates: int,
     score_mode: str,
 ) -> Dict[str, Any]:
@@ -372,15 +373,23 @@ def _adaptive_direction_search_on_frames(
                 ))
         else:
             sti_in = sti
-            _save_img("step1_sti_raw.png", sti)
+            if save_all_sti:
+                _save_img(f"sti_raw/sti_raw_{a:+06.1f}.png", sti)
+            else:
+                _save_img("step1_sti_raw.png", sti)
 
             if edge_method == "sobel":
+                mag_name = "step6_sobel_mag_tmp.png"
+                edge_name = "step7_sobel_edges_tmp.png"
+                if save_all_sti:
+                    mag_name = f"sobel_mag/sobel_mag_{a:+06.1f}.png"
+                    edge_name = f"sobel_edges/sobel_edges_{a:+06.1f}.png"
                 edges = compute_sobel_edges(
                     sti_in,
                     use_circular_roi=use_circular_roi,
                     roi_radius_frac=roi_radius_frac,
-                    save_mag_name="step6_sobel_mag_tmp.png",
-                    save_edge_name="step7_sobel_edges_tmp.png",
+                    save_mag_name=mag_name,
+                    save_edge_name=edge_name,
                     verbose=False,
                 )
                 total, angle_votes, votes_full, theta_axis, rho_max, best_info = hough_angle_voting_weighted(
@@ -395,11 +404,16 @@ def _adaptive_direction_search_on_frames(
                     k_sigma=k_sigma,
                 )
             else:
+                pre_canny_name = "step6_pre_canny_eq_blur_tmp.png"
+                canny_edge_name = "step7_canny_edges_tmp.png"
+                if save_all_sti:
+                    pre_canny_name = f"canny_pre/canny_pre_{a:+06.1f}.png"
+                    canny_edge_name = f"canny_edges/canny_edges_{a:+06.1f}.png"
                 edges = compute_canny_edges(
                     sti_in, use_circular_roi=use_circular_roi,
                     roi_radius_frac=roi_radius_frac,
-                    save_name="step7_canny_edges_tmp.png",
-                    pre_canny_save_name="step6_pre_canny_eq_blur_tmp.png",
+                    save_name=canny_edge_name,
+                    pre_canny_save_name=pre_canny_name,
                     verbose=False
                 )
 
@@ -734,6 +748,7 @@ def adaptive_direction_search(video_path: str,
                               use_M_mono: bool = False,
                               m_mono_peak_ratio: float = 0.5,
                               save_candidate_overlays: bool = False,
+                              save_all_sti: bool = False,
                               top_k_candidates: int = 10,
                               k_sigma: float = 1.0,
                               score_mode: str = "peak_votes",
@@ -762,6 +777,7 @@ def adaptive_direction_search(video_path: str,
         vote_theta_range=vote_theta_range,
         k_sigma=k_sigma,
         save_candidate_overlays=save_candidate_overlays,
+        save_all_sti=save_all_sti,
         top_k_candidates=top_k_candidates,
         score_mode=score_mode,
     )
@@ -891,6 +907,7 @@ def batch_probe_along_line(
                 vote_theta_range=vote_theta_range,
                 k_sigma=k_sigma,
                 save_candidate_overlays=False,
+                save_all_sti=False,
                 top_k_candidates=top_k_candidates,
                 score_mode=score_mode,
             )

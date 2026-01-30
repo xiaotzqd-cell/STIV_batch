@@ -41,6 +41,8 @@ SCORE_MODE: str = "peak_ratio"
 EDGE_METHOD: str = "sobel"
 # 测速线方向搜索方法：可选 "hough" 或 "autocorr"
 DIRECTION_METHOD: str = "hough"
+# 单点测速：保存所有 STI 中间结果（按步骤分文件夹）
+SAVE_ALL_STI: bool = False
 
 # 速度阈值设置（m/s），可按需修改；留 None 表示不限制
 V_MIN: Optional[float] = None
@@ -430,6 +432,7 @@ def main():
         top_k_candidates=TOP_K_CANDIDATES,
         k_sigma=K_SIGMA,
         score_mode=SCORE_MODE,
+        save_all_sti=SAVE_ALL_STI,
         #vote_rho_step=VOTE_RHO_STEP,
     )
 
