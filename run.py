@@ -11,10 +11,10 @@ t0 = time.perf_counter()
 VIDEO = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
 #VIDEO = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 
-CENTER: Tuple[int, int] =(2507,688)#(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
+CENTER: Tuple[int, int] =#brj(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
 #多点测速参数
 USE_BATCH_LINE_PROBING = False # ← 开启多点测速
-BANK_POINT: Tuple[int, int] =(834,487)#CRR(783, 577)#(533, 1120) # 岸边点（与 CENTER 组成测速直线）
+BANK_POINT: Tuple[int, int] =#BRJ(834,487)#CRR(783, 577) # 岸边点（与 CENTER 组成测速直线）
 PROBE_INTERVAL_PX = 100 # 两测点之间的像素间隔（从中心点向两端延伸）
 
 # STI 测线参数（角度搜索范围：线方向）
@@ -42,7 +42,7 @@ EDGE_METHOD: str = "sobel"
 # 测速线方向搜索方法：可选 "hough" 或 "autocorr"
 DIRECTION_METHOD: str = "hough"
 # 单点测速：保存所有 STI 中间结果（按步骤分文件夹）
-SAVE_ALL_STI: bool = False
+SAVE_ALL_STI: bool = True
 
 # 速度阈值设置（m/s），可按需修改；留 None 表示不限制
 V_MIN: Optional[float] = None
