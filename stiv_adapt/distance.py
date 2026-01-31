@@ -12,6 +12,8 @@ import time
 # ====== 配置区 ======
 IMAGE_PATH = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ_calibration_image.jpg"
 #IMAGE_PATH = r"D:\PycharmProjects\River_redio\BRJ_calibration_image.jpg"#新电脑
+VIDEO_PATH = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
+#VIDEO_PATH = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 REAL_DISTANCE_M = 49.38   # 两岸真实距离 (米)
 OUT_DIR = os.path.join(os.path.dirname(__file__), "out_calib")
 MAX_WIN_W, MAX_WIN_H = 1600, 1000   # 窗口最大尺寸，过大会等比例缩放显示
@@ -43,7 +45,31 @@ def on_mouse(event, x, y, flags, param):
     elif event == cv2.EVENT_RBUTTONDOWN:
         points = []
 
-def calibrate_scale(image_path, real_distance_m):
+def _read_first_frame(video):
+    cap = cv2.VideoCapture(video)
+    if not cap.isOpened():
+        raise RuntimeError(f"无法打开视频: {video}")
+    ok, frame = cap.read()
+    cap.release()
+    if not ok or frame is None:
+        raise RuntimeError(f"无法读取视频第一帧: {video}")
+    return frame
+
+def _load_calibration_image(image_path, video_path):
+    use_first_frame = image_path is None or str(image_path).strip().lower() == "none"
+    if use_first_frame:
+        if not video_path:
+            raise FileNotFoundError("图片路径为 None，且未提供视频路径。")
+        frame = _read_first_frame(video_path)
+        return frame, f"{os.path.abspath(video_path)}#frame=0"
+    if not os.path.isfile(image_path):
+        raise FileNotFoundError(f"找不到图片: {image_path}")
+    img = cv2.imread(image_path, cv2.IMREAD_COLOR)
+    if img is None:
+        raise RuntimeError("无法读取图片")
+    return img, os.path.abspath(image_path)
+
+def calibrate_scale(image_path, real_distance_m, video_path=None):
     """
     弹窗选点，返回 (scale_m_per_pixel, (p1, p2), pixel_dist)
     p1, p2 是原始分辨率的坐标
@@ -51,12 +77,7 @@ def calibrate_scale(image_path, real_distance_m):
     global orig_img, disp_img, scale_factor, points
     points = []
 
-    if not os.path.isfile(image_path):
-        raise FileNotFoundError(f"找不到图片: {image_path}")
-
-    orig_img = cv2.imread(image_path, cv2.IMREAD_COLOR)
-    if orig_img is None:
-        raise RuntimeError("无法读取图片")
+    orig_img, image_ref = _load_calibration_image(image_path, video_path)
 
     H0, W0 = orig_img.shape[:2]
     scale_factor = fit_to_window(W0, H0, MAX_WIN_W, MAX_WIN_H)
@@ -108,7 +129,7 @@ def calibrate_scale(image_path, real_distance_m):
             cv2.imwrite(out_img, annotated)
             with open(out_json,"w",encoding="utf-8") as f:
                 json.dump({
-                    "image": os.path.abspath(image_path),
+                    "image": image_ref,
                     "p1": p1, "p2": p2,
                     "pixel_distance": px_dist,
                     "real_distance_m": real_distance_m,
@@ -123,6 +144,6 @@ def calibrate_scale(image_path, real_distance_m):
             return mpp, (p1, p2), px_dist
 
 if __name__ == "__main__":
-    mpp, (p1, p2), px = calibrate_scale(IMAGE_PATH, REAL_DISTANCE_M)
+    mpp, (p1, p2), px = calibrate_scale(IMAGE_PATH, REAL_DISTANCE_M, VIDEO_PATH)
     if mpp:
         print(f"\n最终结果: 1 px = {mpp:.9f} m, p1={p1}, p2={p2}, pixel_dist={px:.2f}")
