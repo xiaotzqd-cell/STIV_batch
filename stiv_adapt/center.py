@@ -1,14 +1,28 @@
 import cv2
-import os
 
 video_path = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
 #video_path = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 
-pic_path =r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ_calibration_image.jpg"
+pic_path = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ_calibration_image.jpg"
 #pic_path =r"D:\PycharmProjects\River_redio\BRJ_calibration_image.jpg"#新电脑
 
-cap = cv2.VideoCapture(video_path)
-img = cv2.imread(pic_path,cv2.IMREAD_COLOR)
+def _read_first_frame(video):
+    cap_local = cv2.VideoCapture(video)
+    if not cap_local.isOpened():
+        raise RuntimeError(f"无法打开视频: {video}")
+    ok, frame = cap_local.read()
+    cap_local.release()
+    if not ok or frame is None:
+        raise RuntimeError(f"无法读取视频第一帧: {video}")
+    return frame
+
+use_first_frame = pic_path is None or str(pic_path).strip().lower() == "none"
+if use_first_frame:
+    img = _read_first_frame(video_path)
+else:
+    img = cv2.imread(pic_path, cv2.IMREAD_COLOR)
+    if img is None:
+        raise RuntimeError(f"无法读取图片: {pic_path}")
 
 H, W = img.shape[:2]
 scale = 0.3
