@@ -1,9 +1,9 @@
 import cv2
 
-video_path = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
+video_path = r"D:\Desktop\data\Heiskanen_et_al_river_flow_camera_data\Surface_flow_velocities\Raw_data\Oulankajoki_River\2024\RGB\Oulanka_2024-05-18_08-02-02_OAKDPOE.mp4"#r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
 #video_path = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 
-pic_path = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ_calibration_image.jpg"
+pic_path = None#r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ_calibration_image.jpg"
 #pic_path =r"D:\PycharmProjects\River_redio\BRJ_calibration_image.jpg"#新电脑
 
 def _read_first_frame(video):

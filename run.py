@@ -8,18 +8,18 @@ from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 t0 = time.perf_counter()
 # ========== 用户配置区（按需修改） ==========
-VIDEO = r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
+VIDEO = r"D:\Desktop\data\Heiskanen_et_al_river_flow_camera_data\Surface_flow_velocities\Raw_data\Oulankajoki_River\2024\RGB\Oulanka_2024-05-18_08-02-02_OAKDPOE.mp4"#r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
 #VIDEO = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 
-CENTER: Tuple[int, int] =#brj(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
+CENTER: Tuple[int, int] =(890, 1487)#brj(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
 #多点测速参数
-USE_BATCH_LINE_PROBING = False # ← 开启多点测速
-BANK_POINT: Tuple[int, int] =#BRJ(834,487)#CRR(783, 577) # 岸边点（与 CENTER 组成测速直线）
+USE_BATCH_LINE_PROBING = True # ← 开启多点测速
+BANK_POINT: Tuple[int, int] =(890, 923)#BRJ(834,487)#CRR(783, 577) # 岸边点（与 CENTER 组成测速直线）
 PROBE_INTERVAL_PX = 100 # 两测点之间的像素间隔（从中心点向两端延伸）
 
 # STI 测线参数（角度搜索范围：线方向）
 LENGTH_PX = 400
-ANGLE_START, ANGLE_END, ANGLE_STEP =-90, -60, 1   # 遍历的“测速线角度”
+ANGLE_START, ANGLE_END, ANGLE_STEP =-20, 20, 1   # 遍历的“测速线角度”
 MAX_FRAMES = 400
 USE_ROI = True
 ROI_RADIUS_FRAC: float = 0.9  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
@@ -43,13 +43,15 @@ EDGE_METHOD: str = "sobel"
 DIRECTION_METHOD: str = "hough"
 # 单点测速：保存所有 STI 中间结果（按步骤分文件夹）
 SAVE_ALL_STI: bool = True
+# 调试图像总开关：False 时不保存角度循环中的中间图（优先级高于 SAVE_ALL_STI）
+SAVE_DEBUG_IMAGES: bool = True
 
 # 速度阈值设置（m/s），可按需修改；留 None 表示不限制
 V_MIN: Optional[float] = None
 V_MAX: Optional[float] = None
 
 # 帧率（建议手动给准值；留 None 则使用视频元数据）
-FPS: Optional[float] = 23.976
+FPS: Optional[float] = 60.04
 
 # 比例尺：二选一
 SCALE_M_PER_PIXEL: Optional[float] = None  # A) 直接给（m/px）；不想手填则设 None 走 B)
@@ -58,7 +60,7 @@ CALIB_LINE_XYXY: Optional[Tuple[int, int, int, int]] = (476, 835,3356, 809)#CRR(
 #投票霍夫的可调参数（法线角 θ 的设置）——
 VOTE_THETA_RES_DEG = 1                 # 角度分辨率（度）
 VOTE_K_RATIO: float = 0.55             # 用比例阈值 K=0.55*R
-VOTE_THETA_RANGE = (0, 180)        # 有效法线角范围 [min, max)
+VOTE_THETA_RANGE = (45, 135)        # 有效法线角范围 [min, max)
 # ==========================================
 def compute_scale_from_first_frame(video_path: str,
                                    xyxy: Tuple[int, int, int, int],
@@ -385,6 +387,7 @@ def main():
             verbose=VERBOSE,
             k_sigma=K_SIGMA,
             score_mode=SCORE_MODE,
+            save_debug_images=SAVE_DEBUG_IMAGES,
         )
 
         print("\n====== 多点测速结果 ======")
@@ -433,6 +436,7 @@ def main():
         k_sigma=K_SIGMA,
         score_mode=SCORE_MODE,
         save_all_sti=SAVE_ALL_STI,
+        save_debug_images=SAVE_DEBUG_IMAGES,
         #vote_rho_step=VOTE_RHO_STEP,
     )
 

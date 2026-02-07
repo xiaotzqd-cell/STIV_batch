@@ -110,7 +110,7 @@ def _circular_roi_mask(shape: tuple[int, int], radius_frac: float = 1.0) -> np.n
 def compute_canny_edges(sti_u8: np.ndarray,
                         use_circular_roi: bool = False,
                         roi_radius_frac: float = 1.0,
-                        save_name: str = "step7_canny_edges.png",
+                        save_name: Optional[str] = "step7_canny_edges.png",
                         pre_canny_save_name: Optional[str] = "step6_pre_canny_eq_blur.png",
                         verbose: bool = False) -> np.ndarray:
     """对 STI 图像执行 Canny 边缘检测。"""
@@ -126,7 +126,8 @@ def compute_canny_edges(sti_u8: np.ndarray,
     if use_circular_roi:
         mask = _circular_roi_mask((H, W), radius_frac=roi_radius_frac)
         edges = cv2.bitwise_and(edges, edges, mask=mask.astype(np.uint8))
-    _save_img(save_name, edges)
+    if save_name:
+        _save_img(save_name, edges)
     if verbose:
         print(f"[canny] v={v:.2f}, low={low}, high={high}, roi={'circle' if use_circular_roi else 'none'}")
     return edges

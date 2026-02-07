@@ -264,6 +264,7 @@ def _adaptive_direction_search_on_frames(
     save_all_sti: bool,
     top_k_candidates: int,
     score_mode: str,
+    save_debug_images: bool,
 ) -> Dict[str, Any]:
     """在给定帧序列上执行方向搜索并返回最佳结果。"""
     probe_rows: List[Dict[str, Any]] = []
@@ -373,17 +374,21 @@ def _adaptive_direction_search_on_frames(
                 ))
         else:
             sti_in = sti
-            if save_all_sti:
-                _save_img(f"sti_raw/sti_raw_{a:+06.1f}.png", sti)
-            else:
-                _save_img("step1_sti_raw.png", sti)
+            if save_debug_images:
+                if save_all_sti:
+                    _save_img(f"sti_raw/sti_raw_{a:+06.1f}.png", sti)
+                else:
+                    _save_img("step1_sti_raw.png", sti)
 
             if edge_method == "sobel":
-                mag_name = "step6_sobel_mag_tmp.png"
-                edge_name = "step7_sobel_edges_tmp.png"
-                if save_all_sti:
-                    mag_name = f"sobel_mag/sobel_mag_{a:+06.1f}.png"
-                    edge_name = f"sobel_edges/sobel_edges_{a:+06.1f}.png"
+                mag_name = None
+                edge_name = None
+                if save_debug_images:
+                    mag_name = "step6_sobel_mag_tmp.png"
+                    edge_name = "step7_sobel_edges_tmp.png"
+                    if save_all_sti:
+                        mag_name = f"sobel_mag/sobel_mag_{a:+06.1f}.png"
+                        edge_name = f"sobel_edges/sobel_edges_{a:+06.1f}.png"
                 edges = compute_sobel_edges(
                     sti_in,
                     use_circular_roi=use_circular_roi,
@@ -404,11 +409,14 @@ def _adaptive_direction_search_on_frames(
                     k_sigma=k_sigma,
                 )
             else:
-                pre_canny_name = "step6_pre_canny_eq_blur_tmp.png"
-                canny_edge_name = "step7_canny_edges_tmp.png"
-                if save_all_sti:
-                    pre_canny_name = f"canny_pre/canny_pre_{a:+06.1f}.png"
-                    canny_edge_name = f"canny_edges/canny_edges_{a:+06.1f}.png"
+                pre_canny_name = None
+                canny_edge_name = None
+                if save_debug_images:
+                    pre_canny_name = "step6_pre_canny_eq_blur_tmp.png"
+                    canny_edge_name = "step7_canny_edges_tmp.png"
+                    if save_all_sti:
+                        pre_canny_name = f"canny_pre/canny_pre_{a:+06.1f}.png"
+                        canny_edge_name = f"canny_edges/canny_edges_{a:+06.1f}.png"
                 edges = compute_canny_edges(
                     sti_in, use_circular_roi=use_circular_roi,
                     roi_radius_frac=roi_radius_frac,
@@ -506,7 +514,7 @@ def _adaptive_direction_search_on_frames(
                   f"ρ_max={int(rho_max)} | ρ_bins={int(rho_bins)} | K={int(K_here)}")
 
 
-            if save_candidate_overlays:
+            if save_debug_images and save_candidate_overlays:
                 _draw_line_overlay(
                     sti, alpha_deg=alpha_deg, theta_normal_deg=theta_normal_deg,
                     slope=slope, peak_votes=peak_votes,
@@ -752,6 +760,7 @@ def adaptive_direction_search(video_path: str,
                               top_k_candidates: int = 10,
                               k_sigma: float = 1.0,
                               score_mode: str = "peak_votes",
+                              save_debug_images: bool = True,
                               ) -> Dict[str, Any]:
     """读取视频并执行自适应方向搜索。"""
     frames, fps = _load_video_frames(video_path, max_frames)
@@ -780,6 +789,7 @@ def adaptive_direction_search(video_path: str,
         save_all_sti=save_all_sti,
         top_k_candidates=top_k_candidates,
         score_mode=score_mode,
+        save_debug_images=save_debug_images,
     )
 
 
@@ -853,6 +863,7 @@ def batch_probe_along_line(
     top_k_candidates: int,
     k_sigma: float,
     score_mode: str,
+    save_debug_images: bool,
 ) -> List[Dict[str, Any]]:
     """沿着给定直线执行多点测速。"""
 
@@ -910,6 +921,7 @@ def batch_probe_along_line(
                 save_all_sti=False,
                 top_k_candidates=top_k_candidates,
                 score_mode=score_mode,
+                save_debug_images=save_debug_images,
             )
 
             # 保存处理前后的 STI 到独立文件，便于逐点查看

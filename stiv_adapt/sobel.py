@@ -193,8 +193,10 @@ def hough_angle_voting_weighted(
     return total_score, angle_votes, scores, theta_axis, rho_max, best_info
 
 
-def _save_img_safe(name: str, img: np.ndarray) -> None:
+def _save_img_safe(name: Optional[str], img: np.ndarray) -> None:
     """延迟导入 core._save_img，避免循环依赖；失败则直接写入当前目录。"""
+    if not name:
+        return
     try:
         from .core import _save_img  # type: ignore
         _save_img(name, img)
@@ -207,8 +209,8 @@ def _save_img_safe(name: str, img: np.ndarray) -> None:
 def compute_sobel_edges(sti_u8: np.ndarray,
                         use_circular_roi: bool = False,
                         roi_radius_frac: float = 1.0,
-                        save_mag_name: str = "step6_sobel_mag.png",
-                        save_edge_name: str = "step7_sobel_edges.png",
+                        save_mag_name: Optional[str] = "step6_sobel_mag.png",
+                        save_edge_name: Optional[str] = "step7_sobel_edges.png",
                         verbose: bool = False) -> np.ndarray:
     """
     计算 Sobel 梯度幅值图（J1）。
