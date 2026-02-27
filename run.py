@@ -8,19 +8,19 @@ from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 t0 = time.perf_counter()
 # ========== 用户配置区（按需修改） ==========
-VIDEO = r"D:\Desktop\data\Heiskanen_et_al_river_flow_camera_data\Surface_flow_velocities\Raw_data\Oulankajoki_River\2024\RGB\Oulanka_2024-05-18_08-02-02_OAKDPOE.mp4"#r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
+VIDEO = r"D:\Desktop\muxie\DJI_0015_XS6_100bit.mp4"#r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
 #VIDEO = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 
-CENTER: Tuple[int, int] =(890, 1487)#brj(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
+CENTER: Tuple[int, int] =(1467, 583)#brj(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
 #多点测速参数
 USE_BATCH_LINE_PROBING = True # ← 开启多点测速
-BANK_POINT: Tuple[int, int] =(890, 923)#BRJ(834,487)#CRR(783, 577) # 岸边点（与 CENTER 组成测速直线）
-PROBE_INTERVAL_PX = 100 # 两测点之间的像素间隔（从中心点向两端延伸）
+BANK_POINT: Tuple[int, int] =(797, 583)#BRJ(834,487)#CRR(783, 577) # 岸边点（与 CENTER 组成测速直线）
+PROBE_INTERVAL_PX = 500 # 两测点之间的像素间隔（从中心点向两端延伸）
 
 # STI 测线参数（角度搜索范围：线方向）
-LENGTH_PX = 400
-ANGLE_START, ANGLE_END, ANGLE_STEP =-20, 20, 1   # 遍历的“测速线角度”
-MAX_FRAMES = 400
+LENGTH_PX = 200
+ANGLE_START, ANGLE_END, ANGLE_STEP =-110, -70, 1   # 遍历的“测速线角度”
+MAX_FRAMES = 200
 USE_ROI = True
 ROI_RADIUS_FRAC: float = 0.9  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
 VERBOSE = True
@@ -51,7 +51,7 @@ V_MIN: Optional[float] = None
 V_MAX: Optional[float] = None
 
 # 帧率（建议手动给准值；留 None 则使用视频元数据）
-FPS: Optional[float] = 60.04
+FPS: Optional[float] = None
 
 # 比例尺：二选一
 SCALE_M_PER_PIXEL: Optional[float] = None  # A) 直接给（m/px）；不想手填则设 None 走 B)
@@ -322,10 +322,13 @@ def save_batch_overlays(
             arrow_len = int(round(min_arrow_len + scale * (max_arrow_len - min_arrow_len)))
 
         # === 6.5 确定箭头方向（正负速度） ===
-        if overlay_speed is not None:
+        # 方向严格按 slope 正负决定；只有在没有 slope 时才退回速度符号
+        if slope is not None:
+            sign = 1 if slope >= 0 else -1
+        elif overlay_speed is not None:
             sign = 1 if overlay_speed >= 0 else -1
         else:
-            sign = 1 if (slope is None or slope >= 0) else -1
+            sign = 1
 
         # === 6.6 画箭头 ===
         _, direction = _line_endpoints(point, 2, angle)  # 单位方向向量
