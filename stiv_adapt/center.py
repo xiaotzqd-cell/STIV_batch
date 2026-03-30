@@ -1,6 +1,6 @@
 import cv2
 
-video_path = r"D:\Desktop\muxie\DJI_0015_XS6_100bit.mp4"#r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
+video_path = r"D:\Desktop\vedio\River_redio\CRG.MP4"#r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
 #video_path = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
 
 pic_path = None#r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ_calibration_image.jpg"

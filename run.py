@@ -8,23 +8,33 @@ from stiv_adapt.search import adaptive_direction_search
 from stiv_adapt.core import init_debug_dir
 t0 = time.perf_counter()
 # ========== 用户配置区（按需修改） ==========
-VIDEO = r"D:\Desktop\muxie\DJI_0015_XS6_100bit.mp4"#r"D:\Programs\Python\stiv\stiv_adapt\data\BRJ.MP4"
-#VIDEO = r"D:\PycharmProjects\River_redio\BRJ.MP4"#新电脑
-
-CENTER: Tuple[int, int] =(1467, 583)#brj(2110,640)#CRR(1987, 570) # ← 手动中心点（像素坐标）
+VIDEO = r"D:\Desktop\vedio\River_redio\CRG.MP4"
+CENTER: Tuple[int, int] =(2317, 513)# ← 手动中心点（像素坐标）
 #多点测速参数
-USE_BATCH_LINE_PROBING = True # ← 开启多点测速
-BANK_POINT: Tuple[int, int] =(797, 583)#BRJ(834,487)#CRR(783, 577) # 岸边点（与 CENTER 组成测速直线）
-PROBE_INTERVAL_PX = 500 # 两测点之间的像素间隔（从中心点向两端延伸）
+USE_BATCH_LINE_PROBING = False # ← 开启多点测速
+BANK_POINT: Tuple[int, int] =(1547, 638)#(797, 583) # 岸边点（与 CENTER 组成测速直线）
+PROBE_INTERVAL_PX = 100 # 两测点之间的像素间隔（从中心点向两端延伸）
 
 # STI 测线参数（角度搜索范围：线方向）
-LENGTH_PX = 200
-ANGLE_START, ANGLE_END, ANGLE_STEP =-110, -70, 1   # 遍历的“测速线角度”
-MAX_FRAMES = 200
+LENGTH_PX = 400
+ANGLE_START, ANGLE_END, ANGLE_STEP =-100, -85, 1   # 遍历的“测速线角度”
+MAX_FRAMES = 400
+
+#从某帧或某秒开始
+START_FRAME: Optional[int] = None
+START_TIME_SEC: Optional[float] = None
+
+# 最佳测速线方向选择策略：peak_votes / peak_ratio
+SCORE_MODE: str = "peak_ratio"
+# 边缘提取方式：可选 "canny" 或 "sobel"
+EDGE_METHOD: str = "sobel"
+# Sobel 得分阈值系数（thr = mu + k_sigma * sigma）
+K_SIGMA: float = 1
+
 USE_ROI = True
 ROI_RADIUS_FRAC: float = 0.9  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
+ROI: Optional[Tuple[int, int, int, int]] = None#(1400,200,2500,1200)  # 矩形 ROI: (x0, y0, x1, y1)，None 表示关闭
 VERBOSE = True
-
 # 对称性评分开关：True 时使用 E_asym 二次筛选最佳角度
 USE_E_ASYM: bool = False
 # 单调性评分开关：True 时启用 M_mono 判据（优先于对称性）
@@ -33,12 +43,8 @@ USE_M_MONO: bool = False
 M_MONO_PEAK_RATIO: float = 0.5
 # 角度候选的得分截取数量（默认取前10名）
 TOP_K_CANDIDATES: int = 3
-# Sobel 得分阈值系数（thr = mu + k_sigma * sigma）
-K_SIGMA: float = 1
-# 最佳测速线方向选择策略：peak_votes / peak_ratio
-SCORE_MODE: str = "peak_ratio"
-# 边缘提取方式：可选 "canny" 或 "sobel"
-EDGE_METHOD: str = "sobel"
+
+
 # 测速线方向搜索方法：可选 "hough" 或 "autocorr"
 DIRECTION_METHOD: str = "hough"
 # 单点测速：保存所有 STI 中间结果（按步骤分文件夹）
@@ -55,7 +61,7 @@ FPS: Optional[float] = None
 
 # 比例尺：二选一
 SCALE_M_PER_PIXEL: Optional[float] = None  # A) 直接给（m/px）；不想手填则设 None 走 B)
-CALIB_REAL_M: Optional[float] = 23.16     # B) 首帧两点标定（米）
+CALIB_REAL_M: Optional[float] = None     # B) 首帧两点标定（米）
 CALIB_LINE_XYXY: Optional[Tuple[int, int, int, int]] = (476, 835,3356, 809)#CRR(445, 1321, 3085, 1444)
 #投票霍夫的可调参数（法线角 θ 的设置）——
 VOTE_THETA_RES_DEG = 1                 # 角度分辨率（度）
@@ -79,6 +85,87 @@ def compute_scale_from_first_frame(video_path: str,
     print(f"[calib] 像素距离={px:.2f}px, 真实距离={real_meters:.3f}m -> SCALE_M_PER_PIXEL={m_per_px:.6f} m/px")
     return m_per_px
 
+
+def _normalize_roi(roi: Tuple[int, int, int, int], frame_w: int, frame_h: int) -> Tuple[int, int, int, int]:
+    x0, y0, x1, y1 = [int(v) for v in roi]
+    x_min, x_max = sorted((x0, x1))
+    y_min, y_max = sorted((y0, y1))
+    if x_min < 0 or y_min < 0 or x_max > frame_w or y_max > frame_h:
+        raise ValueError(f"ROI 超出视频边界: {roi}, frame=({frame_w},{frame_h})")
+    if x_max <= x_min or y_max <= y_min:
+        raise ValueError(f"ROI 无效: {roi}")
+    return x_min, y_min, x_max, y_max
+
+
+def _point_in_roi(point: Tuple[int, int], roi: Tuple[int, int, int, int]) -> bool:
+    x, y = int(point[0]), int(point[1])
+    x0, y0, x1, y1 = roi
+    return x0 <= x < x1 and y0 <= y < y1
+
+
+def _global_to_local_point(point: Tuple[int, int], roi: Optional[Tuple[int, int, int, int]]) -> Tuple[int, int]:
+    if roi is None:
+        return int(point[0]), int(point[1])
+    x0, y0, _, _ = roi
+    return int(point[0] - x0), int(point[1] - y0)
+
+
+def _global_to_local_line(
+    line_xyxy: Optional[Tuple[int, int, int, int]],
+    roi: Optional[Tuple[int, int, int, int]],
+) -> Optional[Tuple[int, int, int, int]]:
+    if line_xyxy is None:
+        return None
+    if roi is None:
+        return tuple(int(v) for v in line_xyxy)
+    x0, y0, _, _ = roi
+    x1, y1, x2, y2 = line_xyxy
+    return int(x1 - x0), int(y1 - y0), int(x2 - x0), int(y2 - y0)
+
+
+def _crop_video_to_roi(video_path: str, out_path: str, roi: Tuple[int, int, int, int]) -> None:
+    x0, y0, x1, y1 = roi
+    crop_w, crop_h = x1 - x0, y1 - y0
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"无法打开视频: {video_path}")
+    fps = float(cap.get(cv2.CAP_PROP_FPS))
+    if not fps or math.isnan(fps) or math.isinf(fps):
+        fps = 30.0
+    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (crop_w, crop_h))
+    if not writer.isOpened():
+        cap.release()
+        raise RuntimeError(f"无法创建 ROI 视频: {out_path}")
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            writer.write(frame[y0:y1, x0:x1])
+    finally:
+        cap.release()
+        writer.release()
+
+
+def _iter_angles(angle_start: float, angle_end: float, angle_step: float):
+    if angle_step == 0:
+        raise ValueError("ANGLE_STEP 不能为 0")
+    if angle_step > 0:
+        a = angle_start
+        while a <= angle_end + 1e-9:
+            yield float(a)
+            a += angle_step
+    else:
+        a = angle_start
+        while a >= angle_end - 1e-9:
+            yield float(a)
+            a += angle_step
+
+
+def _line_fully_inside_frame(center: Tuple[int, int], length_px: int, angle_deg: float, frame_w: int, frame_h: int) -> bool:
+    (x1, y1, x2, y2), _ = _line_endpoints(center, length_px, angle_deg)
+    return (0 <= x1 < frame_w and 0 <= y1 < frame_h and 0 <= x2 < frame_w and 0 <= y2 < frame_h)
+
 def _is_speed_out_of_range(speed: Optional[float]) -> bool:
     """依据 V_MIN/V_MAX 判断速度是否超出允许范围（按绝对值比较）。"""
     if speed is None:
@@ -94,7 +181,7 @@ def _line_endpoints(center, length_px, angle_deg):
     """"根据中心点和线长度，计算两端点坐标和方向向量"""
     cx, cy = center
     half = length_px / 2.0
-    rad  = math.radians(angle_deg)#转弧度
+    rad  = math.radians(angle_deg) #转弧度
     dx, dy = math.cos(rad), math.sin(rad)#单位方向向量
     x1 = int(round(cx - half*dx)); y1 = int(round(cy - half*dy))
     x2 = int(round(cx + half*dx)); y2 = int(round(cy + half*dy))
@@ -112,6 +199,7 @@ def save_flow_overlay(
     fps: float|None,                  # 帧率，可为 None
     calib_xyxy: tuple|None=None,      # (x1,y1,x2,y2)
     calib_real_m: float|None=None,    # 真实距离（米）
+    center_display: tuple|None=None,  # 显示时使用的中心点（用于保持原图坐标）
     filename: str="frame_overlay.png",
     preview_max_side: int=1280
 ):
@@ -154,7 +242,8 @@ def save_flow_overlay(
         cv2.putText(frame, line, (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (20,20,20), 3, cv2.LINE_AA)
         cv2.putText(frame, line, (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2, cv2.LINE_AA)
 
-    put(f"center={center}, angle={best_angle_deg:.1f} deg, length={length_px}px", 0)
+    shown_center = center if center_display is None else center_display
+    put(f"center={shown_center}, angle={best_angle_deg:.1f} deg, length={length_px}px", 0)
     put(f"slope = {('None' if slope_px_per_frame is None else f'{slope_px_per_frame:.6f}')} px/frame", 1)
     put(f"m/px = {('None' if m_per_px is None else f'{m_per_px:.6f}')}", 2)
     put(f"FPS  = {('None' if fps is None else f'{fps:.6f}')}", 3)
@@ -349,10 +438,55 @@ def main():
         raise FileNotFoundError(f"视频不存在: {VIDEO}")
 
     outdir = init_debug_dir(tag="stiv-accu-vote")
+    process_video = VIDEO
+    roi_box: Optional[Tuple[int, int, int, int]] = None
+    roi_offset = (0, 0)
+    center_proc = CENTER
+    bank_point_proc = BANK_POINT
+    calib_line_proc = CALIB_LINE_XYXY
+
+    cap0 = cv2.VideoCapture(VIDEO)
+    ok0, frame0 = cap0.read()
+    cap0.release()
+    if not ok0:
+        raise RuntimeError(f"无法读取视频首帧: {VIDEO}")
+    frame_h, frame_w = frame0.shape[:2]
+
+    if ROI is not None:
+        roi_box = _normalize_roi(ROI, frame_w, frame_h)
+        if not _point_in_roi(CENTER, roi_box):
+            raise ValueError(f"CENTER 点落在 ROI 外: CENTER={CENTER}, ROI={roi_box}")
+
+        center_proc = _global_to_local_point(CENTER, roi_box)
+        bank_point_proc = _global_to_local_point(BANK_POINT, roi_box)
+        calib_line_proc = _global_to_local_line(CALIB_LINE_XYXY, roi_box)
+        roi_offset = (roi_box[0], roi_box[1])
+
+        roi_video_path = os.path.join(outdir, "roi_cropped.mp4")
+        _crop_video_to_roi(VIDEO, roi_video_path, roi_box)
+        process_video = roi_video_path
+
+    check_w = frame_w if roi_box is None else (roi_box[2] - roi_box[0])
+    check_h = frame_h if roi_box is None else (roi_box[3] - roi_box[1])
+    for angle in _iter_angles(ANGLE_START, ANGLE_END, ANGLE_STEP):
+        if not _line_fully_inside_frame(center_proc, LENGTH_PX, angle, check_w, check_h):
+            raise ValueError(
+                f"CENTER 对应测速线超出ROI: center={CENTER}, angle={angle}, LENGTH_PX={LENGTH_PX}, ROI={roi_box}"
+            )
+
     print(f"[out] 所有步骤图将保存到：{outdir}")
     print(f"[cfg] CENTER={CENTER}, LENGTH_PX={LENGTH_PX}, ANGLES=({ANGLE_START},{ANGLE_END},{ANGLE_STEP}), "
           f"MAX_FRAMES={MAX_FRAMES}, USE_ROI={USE_ROI}")
+    print(f"[cfg] ROI={ROI}")
+    print(f"[cfg] START_FRAME={START_FRAME}, START_TIME_SEC={START_TIME_SEC}")
     print(f"[cfg] V_MIN={V_MIN}, V_MAX={V_MAX} (单位：m/s，None 表示不限制)")
+
+    if START_FRAME is not None and START_TIME_SEC is not None:
+        raise ValueError("START_FRAME 与 START_TIME_SEC 只能设置一个")
+    if START_FRAME is not None and START_FRAME < 0:
+        raise ValueError("START_FRAME 不能为负数")
+    if START_TIME_SEC is not None and START_TIME_SEC < 0:
+        raise ValueError("START_TIME_SEC 不能为负数")
 
     # 计算/确定比例尺
     m_per_px = SCALE_M_PER_PIXEL
@@ -367,13 +501,15 @@ def main():
         from stiv_adapt.search import batch_probe_along_line
 
         results = batch_probe_along_line(
-            video_path=VIDEO,
-            center=CENTER,
-            bank_point=BANK_POINT,
+            video_path=process_video,
+            center=center_proc,
+            bank_point=bank_point_proc,
             interval_px=PROBE_INTERVAL_PX,
             length_px=LENGTH_PX,
             angle_range=(ANGLE_START, ANGLE_END, ANGLE_STEP),
             max_frames=MAX_FRAMES,
+            start_frame=START_FRAME,
+            start_time_sec=START_TIME_SEC,
             m_per_px=m_per_px,
             fps=FPS,
             use_circular_roi=USE_ROI,
@@ -388,6 +524,7 @@ def main():
             vote_theta_range=VOTE_THETA_RANGE,
             top_k_candidates=TOP_K_CANDIDATES,
             verbose=VERBOSE,
+            coord_offset=roi_offset,
             k_sigma=K_SIGMA,
             score_mode=SCORE_MODE,
             save_debug_images=SAVE_DEBUG_IMAGES,
@@ -402,12 +539,22 @@ def main():
                 f"slope={row['slope_px_per_frame']} px/frame speed={speed_txt} score={row['score']}"
             )
 
+        overlay_results = results
+        if roi_box is not None:
+            ox, oy = roi_offset
+            overlay_results = []
+            for row in results:
+                local_row = dict(row)
+                local_row["point_x"] = int(local_row["point_x"]) - ox
+                local_row["point_y"] = int(local_row["point_y"]) - oy
+                overlay_results.append(local_row)
+
         save_batch_overlays(
-            video_path=VIDEO,
+            video_path=process_video,
             outdir=outdir,
-            center=CENTER,
-            bank_point=BANK_POINT,
-            batch_results=results,
+            center=center_proc,
+            bank_point=bank_point_proc,
+            batch_results=overlay_results,
             m_per_px=m_per_px,
             default_fps=FPS,
         )
@@ -416,13 +563,15 @@ def main():
 
     # 自适应方向搜索（Hough 或自相关；由 DIRECTION_METHOD 控制）
     best = adaptive_direction_search(
-        video_path=VIDEO,
-        center=CENTER,
+        video_path=process_video,
+        center=center_proc,
         length_px=LENGTH_PX,
         angle_start=ANGLE_START,
         angle_end=ANGLE_END,
         angle_step=ANGLE_STEP,
         max_frames=MAX_FRAMES,
+        start_frame=START_FRAME,
+        start_time_sec=START_TIME_SEC,
         use_circular_roi=USE_ROI,
         roi_radius_frac=ROI_RADIUS_FRAC,
         edge_method=EDGE_METHOD,
@@ -454,16 +603,17 @@ def main():
     # 叠加到首帧预览图
     slope = best["slope"]      # dx/dy (px/frame)
     save_flow_overlay(
-        video_path=VIDEO,
+        video_path=process_video,
         outdir=outdir,
-        center=CENTER,
+        center=center_proc,
         best_angle_deg=best.get("angle_probe", best["angle"]),
         length_px=LENGTH_PX,
         slope_px_per_frame=slope,
         m_per_px=m_per_px,
         fps=best.get("fps"),
-        calib_xyxy=CALIB_LINE_XYXY,
+        calib_xyxy=calib_line_proc,
         calib_real_m=CALIB_REAL_M,
+        center_display=CENTER,
         filename="frame_overlay.png",
         preview_max_side=1280
     )
@@ -483,6 +633,11 @@ def main():
         print(f"主峰占比(peak_ratio): {best['peak_ratio']:.4f}")
     print(f"用于筛选的得分: {best['score']:.4f}" if best.get("score_mode") == "peak_ratio" else f"用于筛选的得分: {best['score']:.1f}")
     print(f"STI 斜率 slope (px/frame): {best['slope'] if best['slope'] is not None else 'None'}")
+    if best["slope"] is not None and best.get("fps"):
+        v_pxps = best["slope"] * best["fps"]
+        print(f"像素速度: {v_pxps:.4f} px/s   (slope={best['slope']:.6f} px/frame, FPS={best['fps']:.3f})")
+    else:
+        print("未计算像素速度：缺少 slope 或 FPS。")
     if USE_M_MONO:
         print(f"M_mono 单调性评分: {best.get('M_mono')}")
     if USE_E_ASYM:
@@ -506,8 +661,6 @@ def main():
         avg = sum(t["seconds"] for t in times) / len(times)
         slow = max(times, key=lambda t: t["seconds"])
         print(f"单条平均用时: {avg:.3f} s，最慢: {slow['angle']:.1f}° → {slow['seconds']:.3f} s")
-        preview = ", ".join(f"{t['angle']:.1f}°:{t['seconds']:.3f}s" for t in times[:10])
-        print(f"每条用时(前10): {preview}")
 
     print("所有步骤图已写入输出目录。")
 

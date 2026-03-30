@@ -217,7 +217,12 @@ def _extract_peak_from_votes(
     }
 
 
-def _load_video_frames(video_path: str, max_frames: int) -> Tuple[List[np.ndarray], float]:
+def _load_video_frames(
+    video_path: str,
+    max_frames: int,
+    start_frame: Optional[int] = None,
+    start_time_sec: Optional[float] = None,
+) -> Tuple[List[np.ndarray], float]:
     """读取视频帧并返回灰度帧列表及 FPS。"""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -225,6 +230,26 @@ def _load_video_frames(video_path: str, max_frames: int) -> Tuple[List[np.ndarra
     fps = float(cap.get(cv2.CAP_PROP_FPS))
     if not fps or math.isinf(fps) or math.isnan(fps):
         fps = 30.0
+
+    if start_frame is not None and start_time_sec is not None:
+        cap.release()
+        raise ValueError("start_frame 与 start_time_sec 只能设置一个")
+
+    target_frame = 0
+    if start_time_sec is not None:
+        if start_time_sec < 0:
+            cap.release()
+            raise ValueError("start_time_sec 不能为负数")
+        target_frame = int(round(float(start_time_sec) * fps))
+    elif start_frame is not None:
+        if start_frame < 0:
+            cap.release()
+            raise ValueError("start_frame 不能为负数")
+        target_frame = int(start_frame)
+
+    if target_frame > 0:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+
     frames: List[np.ndarray] = []
     count = 0
     while True:
@@ -743,6 +768,8 @@ def adaptive_direction_search(video_path: str,
                               length_px: int,
                               angle_start: float, angle_end: float, angle_step: float,
                               max_frames: int = 300,
+                              start_frame: Optional[int] = None,
+                              start_time_sec: Optional[float] = None,
                               use_circular_roi: bool = False,
                               roi_radius_frac: float = 1.0,
                               edge_method: str = "canny",
@@ -763,7 +790,12 @@ def adaptive_direction_search(video_path: str,
                               save_debug_images: bool = True,
                               ) -> Dict[str, Any]:
     """读取视频并执行自适应方向搜索。"""
-    frames, fps = _load_video_frames(video_path, max_frames)
+    frames, fps = _load_video_frames(
+        video_path,
+        max_frames,
+        start_frame=start_frame,
+        start_time_sec=start_time_sec,
+    )
 
     return _adaptive_direction_search_on_frames(
         frames,
@@ -846,6 +878,8 @@ def batch_probe_along_line(
     length_px: int,
     angle_range: Tuple[float, float, float],
     max_frames: int,
+    start_frame: Optional[int],
+    start_time_sec: Optional[float],
     m_per_px: Optional[float],
     fps: Optional[float],
     use_circular_roi: bool,
@@ -857,6 +891,7 @@ def batch_probe_along_line(
     vote_theta_range: Tuple[float, float],
     verbose: bool,
     *,
+    coord_offset: Tuple[int, int] = (0, 0),
     use_E_asym: bool,
     use_M_mono: bool,
     m_mono_peak_ratio: float,
@@ -867,7 +902,12 @@ def batch_probe_along_line(
 ) -> List[Dict[str, Any]]:
     """沿着给定直线执行多点测速。"""
 
-    frames, video_fps = _load_video_frames(video_path, max_frames)
+    frames, video_fps = _load_video_frames(
+        video_path,
+        max_frames,
+        start_frame=start_frame,
+        start_time_sec=start_time_sec,
+    )
     effective_fps = fps if fps is not None else video_fps
     angle_start, angle_end, angle_step = angle_range
 
@@ -894,8 +934,11 @@ def batch_probe_along_line(
     except Exception:
         pass
 
+    ox, oy = int(coord_offset[0]), int(coord_offset[1])
+
     for idx, point in enumerate(probe_points):
-        suffix = f"point_{idx:02d}_x{point[0]}_y{point[1]}"
+        point_global = (int(point[0] + ox), int(point[1] + oy))
+        suffix = f"point_{idx:02d}_x{point_global[0]}_y{point_global[1]}"
         with push_debug_dir(suffix):
             best = _adaptive_direction_search_on_frames(
                 frames,
@@ -945,8 +988,8 @@ def batch_probe_along_line(
 
         result_row = {
             "index": idx,
-            "point_x": point[0],
-            "point_y": point[1],
+            "point_x": point_global[0],
+            "point_y": point_global[1],
             "angle_probe_deg": best.get("angle_probe"),
             "alpha_deg": best.get("angle"),
             "slope_px_per_frame": best.get("slope"),
@@ -963,7 +1006,7 @@ def batch_probe_along_line(
         if verbose:
             speed_txt = "N/A" if speed_m_per_s is None else f"{speed_m_per_s:.4f}"
             mono_txt = "" if not use_M_mono else f" | M_mono={best.get('M_mono')}"
-            print(f"[batch] point#{idx:02d} {point} | length={length_px}px | speed={speed_txt} m/s{mono_txt}")
+            print(f"[batch] point#{idx:02d} {point_global} | length={length_px}px | speed={speed_txt} m/s{mono_txt}")
 
     try:
         df = pd.DataFrame(results)
