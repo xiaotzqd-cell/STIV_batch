@@ -1,24 +1,27 @@
 # -*- coding: utf-8 -*-
+import csv
 import os
 import math
 import time
 import cv2
 from typing import Optional, Tuple, List, Dict
 from stiv_adapt.search import adaptive_direction_search
-from stiv_adapt.core import init_debug_dir
+from stiv_adapt.core import init_debug_dir, spatial_sample_count
 t0 = time.perf_counter()
 # ========== 用户配置区（按需修改） ==========
-VIDEO = r"D:\Desktop\vedio\River_redio\CRG.MP4"
-CENTER: Tuple[int, int] =(2317, 513)# ← 手动中心点（像素坐标）
+VIDEO = r"D:\Desktop\东风渠\测流视频\20260529\110000_undistort.mp4"
+CENTER: Tuple[int, int] =(1919, 1049)# ← 手动中心点（像素坐标）
 #多点测速参数
-USE_BATCH_LINE_PROBING = False # ← 开启多点测速
-BANK_POINT: Tuple[int, int] =(1547, 638)#(797, 583) # 岸边点（与 CENTER 组成测速直线）
+USE_BATCH_LINE_PROBING = True # ← 开启多点测速
+BANK_POINT: Tuple[int, int] =(1919, 193)#(797, 583) # 岸边点（与 CENTER 组成测速直线）
 PROBE_INTERVAL_PX = 100 # 两测点之间的像素间隔（从中心点向两端延伸）
 
 # STI 测线参数（角度搜索范围：线方向）
-LENGTH_PX = 400
-ANGLE_START, ANGLE_END, ANGLE_STEP =-100, -85, 1   # 遍历的“测速线角度”
-MAX_FRAMES = 400
+LENGTH_PX = 1500
+ANGLE_START, ANGLE_END, ANGLE_STEP =0, 0, 1   # 遍历的“测速线角度”
+MAX_FRAMES = 750
+SPATIAL_SAMPLE_STEP = 2
+ARROW_HEAD_PX = 10
 
 #从某帧或某秒开始
 START_FRAME: Optional[int] = None
@@ -29,7 +32,7 @@ SCORE_MODE: str = "peak_ratio"
 # 边缘提取方式：可选 "canny" 或 "sobel"
 EDGE_METHOD: str = "sobel"
 # Sobel 得分阈值系数（thr = mu + k_sigma * sigma）
-K_SIGMA: float = 1
+K_SIGMA: float = 2
 
 USE_ROI = True
 ROI_RADIUS_FRAC: float = 0.9  # ROI 半径比例（相对 min(H, W)/2），需开启 USE_ROI 才生效
@@ -64,9 +67,13 @@ SCALE_M_PER_PIXEL: Optional[float] = None  # A) 直接给（m/px）；不想手�
 CALIB_REAL_M: Optional[float] = None     # B) 首帧两点标定（米）
 CALIB_LINE_XYXY: Optional[Tuple[int, int, int, int]] = (476, 835,3356, 809)#CRR(445, 1321, 3085, 1444)
 #投票霍夫的可调参数（法线角 θ 的设置）——
-VOTE_THETA_RES_DEG = 1                 # 角度分辨率（度）
+VOTE_THETA_RES_DEG = 0.1              # 精搜/旧模式角度分辨率（度）
 VOTE_K_RATIO: float = 0.55             # 用比例阈值 K=0.55*R
-VOTE_THETA_RANGE = (45, 135)        # 有效法线角范围 [min, max)
+VOTE_THETA_RANGE = (45,135)        # 有效法线角范围 [min, max)
+USE_COARSE_TO_FINE_THETA: bool = True
+VOTE_THETA_COARSE_RES_DEG: float = 1.0
+VOTE_THETA_FINE_RES_DEG: float = 0.1
+VOTE_THETA_FINE_HALF_WIDTH_DEG: float = 1.0
 # ==========================================
 def compute_scale_from_first_frame(video_path: str,
                                    xyxy: Tuple[int, int, int, int],
@@ -177,6 +184,24 @@ def _is_speed_out_of_range(speed: Optional[float]) -> bool:
         return True
     return False
 
+
+def _correct_velocity_px_per_frame(slope_sti: Optional[float],
+                                   spatial_sample_step: int) -> Optional[float]:
+    """把 STI 采样点/frame 斜率换算成原图 px/frame。"""
+    if slope_sti is None:
+        return None
+    return float(slope_sti) * float(spatial_sample_step)
+
+
+def _velocity_mps(velocity_px_per_frame: Optional[float],
+                  m_per_px: Optional[float],
+                  fps: Optional[float]) -> Optional[float]:
+    """按原图 px/frame 速度换算 m/s，保留方向符号。"""
+    if velocity_px_per_frame is None or m_per_px is None or fps is None:
+        return None
+    return float(velocity_px_per_frame) * float(m_per_px) * float(fps)
+
+
 def _line_endpoints(center, length_px, angle_deg):
     """"根据中心点和线长度，计算两端点坐标和方向向量"""
     cx, cy = center
@@ -188,13 +213,20 @@ def _line_endpoints(center, length_px, angle_deg):
     return (x1, y1, x2, y2), (dx, dy)
 
 
+def _fixed_arrow_tip_ratio(arrow_len_px: float) -> float:
+    """Return OpenCV tipLength ratio for a fixed-size arrow head."""
+    return min(0.45, ARROW_HEAD_PX / max(float(arrow_len_px), 1.0))
+
+
 def save_flow_overlay(
     video_path: str,
     outdir: str,
     center: tuple,                    # (cx, cy)
     best_angle_deg: float,            # 你的最佳角度（线方向）
     length_px: int,                   # 测线像素长度
-    slope_px_per_frame: float|None,   # dx/dy (px/frame)
+    slope_px_per_frame: float|None,   # dx/dy (STI sample/frame)
+    spatial_sample_step: int,         # 测速线方向空间抽样步长
+    spatial_sample_count: int,        # 抽样后的 STI 空间宽度
     m_per_px: float|None,             # 比例尺，可为 None
     fps: float|None,                  # 帧率，可为 None
     calib_xyxy: tuple|None=None,      # (x1,y1,x2,y2)
@@ -231,9 +263,10 @@ def save_flow_overlay(
     # —— 流动方向箭头（绿色） ——
     sign = 1 if (slope_px_per_frame is None or slope_px_per_frame >= 0) else -1
     arrow_len = max(60, int(round(length_px * 0.15)))
+    #arrow_len = 4
     start = (int(center[0]), int(center[1]))
     end   = (int(center[0] + sign*dx*arrow_len), int(center[1] + sign*dy*arrow_len))
-    cv2.arrowedLine(frame, start, end, (0,255,0), 4, tipLength=0.1)
+    cv2.arrowedLine(frame, start, end, (0,255,0), 4, tipLength=_fixed_arrow_tip_ratio(arrow_len))
 
     # —— 左上角信息：slope / m/px / FPS / v(m/s) ——
     def put(line, row):
@@ -243,16 +276,19 @@ def save_flow_overlay(
         cv2.putText(frame, line, (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2, cv2.LINE_AA)
 
     shown_center = center if center_display is None else center_display
-    put(f"center={shown_center}, angle={best_angle_deg:.1f} deg, length={length_px}px", 0)
-    put(f"slope = {('None' if slope_px_per_frame is None else f'{slope_px_per_frame:.6f}')} px/frame", 1)
-    put(f"m/px = {('None' if m_per_px is None else f'{m_per_px:.6f}')}", 2)
-    put(f"FPS  = {('None' if fps is None else f'{fps:.6f}')}", 3)
+    velocity_px_per_frame = _correct_velocity_px_per_frame(slope_px_per_frame, spatial_sample_step)
+    v_mps = _velocity_mps(velocity_px_per_frame, m_per_px, fps)
 
-    if slope_px_per_frame is not None and m_per_px is not None and fps is not None:
-        v_mps = abs(slope_px_per_frame) * m_per_px * fps
-        put(f"v = {v_mps:.4f} m/s", 4)
+    put(f"center={shown_center}, angle={best_angle_deg:.1f} deg, length={length_px}px", 0)
+    put(f"step={spatial_sample_step}, samples={spatial_sample_count}", 1)
+    put(f"slope_sti = {('None' if slope_px_per_frame is None else f'{slope_px_per_frame:.6f}')} sample/frame", 2)
+    put(f"v_px/frame = {('None' if velocity_px_per_frame is None else f'{velocity_px_per_frame:.6f}')}", 3)
+    put(f"m/px={('None' if m_per_px is None else f'{m_per_px:.6f}')}, FPS={('None' if fps is None else f'{fps:.3f}')}", 4)
+
+    if v_mps is not None:
+        put(f"v = {abs(v_mps):.4f} m/s", 5)
     else:
-        put("v = N/A (缺少 slope/mpp/FPS)", 4)
+        put("v = N/A (缺少 slope/mpp/FPS)", 5)
 
     os.makedirs(outdir, exist_ok=True)
     out_path = os.path.join(outdir, filename)
@@ -323,12 +359,17 @@ def save_batch_overlays(
     for row in batch_results:
         spd = row.get("speed_m_per_s")
 
-        # 若没有直接给出速度，则用 slope * m_per_px * fps 计算
+        # 若没有直接给出速度，则用校正后的原图 px/frame 速度计算
         if spd is None:
             slope = row.get("slope_px_per_frame")
+            step = int(row.get("spatial_sample_step", SPATIAL_SAMPLE_STEP))
+            velocity_px_per_frame = row.get("velocity_px_per_frame_corrected")
+            if velocity_px_per_frame is None:
+                velocity_px_per_frame = _correct_velocity_px_per_frame(slope, step)
             fps_here = row.get("fps") or default_fps
-            if slope is not None and m_per_px is not None and fps_here:
-                spd = slope * m_per_px * fps_here
+            velocity_mps = _velocity_mps(velocity_px_per_frame, m_per_px, fps_here)
+            if velocity_mps is not None:
+                spd = abs(velocity_mps)
 
         # 若得到有效速度，则保存至临时字段 "_overlay_speed_mps"
         if spd is not None:
@@ -424,12 +465,61 @@ def save_batch_overlays(
         dx, dy = direction
         start = (int(point[0]), int(point[1]))
         end = (int(point[0] + sign * dx * arrow_len), int(point[1] + sign * dy * arrow_len))
-        cv2.arrowedLine(overview, start, end, color, 3, tipLength=0.2)
+        cv2.arrowedLine(overview, start, end, color, 3, tipLength=_fixed_arrow_tip_ratio(arrow_len))
 
     # === 7. 保存总览图 ===
     overview_path = os.path.join(overlay_dir, "batch_overview.png")
     cv2.imwrite(overview_path, overview)
     print(f"[batch overlay] 总览图已保存：{overview_path}")
+
+
+def save_single_summary(
+    outdir: str,
+    best: Dict[str, object],
+    *,
+    length_px: int,
+    spatial_sample_step: int,
+    spatial_sample_count_value: int,
+    max_frames: int,
+    m_per_px: Optional[float],
+) -> None:
+    """保存单点测速 summary.csv。"""
+    slope_sti = best.get("slope_sti", best.get("slope"))
+    velocity_px_per_frame = best.get("velocity_px_per_frame_corrected")
+    if velocity_px_per_frame is None:
+        velocity_px_per_frame = _correct_velocity_px_per_frame(
+            slope_sti if isinstance(slope_sti, (int, float)) else None,
+            spatial_sample_step,
+        )
+    fps = best.get("fps")
+    velocity_mps = _velocity_mps(
+        velocity_px_per_frame if isinstance(velocity_px_per_frame, (int, float)) else None,
+        m_per_px,
+        fps if isinstance(fps, (int, float)) else None,
+    )
+
+    row = {
+        "spatial_sample_step": spatial_sample_step,
+        "length_px": length_px,
+        "spatial_sample_count": spatial_sample_count_value,
+        "max_frames": max_frames,
+        "slope_sti": slope_sti,
+        "velocity_px_per_frame_corrected": velocity_px_per_frame,
+        "velocity_mps": velocity_mps,
+        "fps": fps,
+        "meter_per_pixel": m_per_px,
+        "angle_probe_deg": best.get("angle_probe"),
+        "alpha_deg": best.get("angle"),
+        "score": best.get("score"),
+    }
+    fieldnames = list(row.keys())
+    os.makedirs(outdir, exist_ok=True)
+    summary_path = os.path.join(outdir, "summary.csv")
+    with open(summary_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow(row)
+    print(f"[summary] {os.path.abspath(summary_path)}")
 
 
 def main():
@@ -451,6 +541,7 @@ def main():
     if not ok0:
         raise RuntimeError(f"无法读取视频首帧: {VIDEO}")
     frame_h, frame_w = frame0.shape[:2]
+    spatial_count = spatial_sample_count(LENGTH_PX, SPATIAL_SAMPLE_STEP)
 
     if ROI is not None:
         roi_box = _normalize_roi(ROI, frame_w, frame_h)
@@ -475,8 +566,14 @@ def main():
             )
 
     print(f"[out] 所有步骤图将保存到：{outdir}")
-    print(f"[cfg] CENTER={CENTER}, LENGTH_PX={LENGTH_PX}, ANGLES=({ANGLE_START},{ANGLE_END},{ANGLE_STEP}), "
+    print(f"[cfg] CENTER={CENTER}, LENGTH_PX={LENGTH_PX}, SPATIAL_SAMPLE_STEP={SPATIAL_SAMPLE_STEP}, "
+          f"spatial_sample_count={spatial_count}, ANGLES=({ANGLE_START},{ANGLE_END},{ANGLE_STEP}), "
           f"MAX_FRAMES={MAX_FRAMES}, USE_ROI={USE_ROI}")
+    print(
+        f"[cfg] VOTE_THETA_RANGE={VOTE_THETA_RANGE}, coarse_to_fine={USE_COARSE_TO_FINE_THETA}, "
+        f"coarse_res={VOTE_THETA_COARSE_RES_DEG}, fine_res={VOTE_THETA_FINE_RES_DEG}, "
+        f"fine_half_width={VOTE_THETA_FINE_HALF_WIDTH_DEG}"
+    )
     print(f"[cfg] ROI={ROI}")
     print(f"[cfg] START_FRAME={START_FRAME}, START_TIME_SEC={START_TIME_SEC}")
     print(f"[cfg] V_MIN={V_MIN}, V_MAX={V_MAX} (单位：m/s，None 表示不限制)")
@@ -508,6 +605,7 @@ def main():
             length_px=LENGTH_PX,
             angle_range=(ANGLE_START, ANGLE_END, ANGLE_STEP),
             max_frames=MAX_FRAMES,
+            spatial_sample_step=SPATIAL_SAMPLE_STEP,
             start_frame=START_FRAME,
             start_time_sec=START_TIME_SEC,
             m_per_px=m_per_px,
@@ -522,6 +620,10 @@ def main():
             vote_theta_res_deg=VOTE_THETA_RES_DEG,
             vote_k_ratio=VOTE_K_RATIO,
             vote_theta_range=VOTE_THETA_RANGE,
+            use_coarse_to_fine_theta=USE_COARSE_TO_FINE_THETA,
+            vote_theta_coarse_res_deg=VOTE_THETA_COARSE_RES_DEG,
+            vote_theta_fine_res_deg=VOTE_THETA_FINE_RES_DEG,
+            vote_theta_fine_half_width_deg=VOTE_THETA_FINE_HALF_WIDTH_DEG,
             top_k_candidates=TOP_K_CANDIDATES,
             verbose=VERBOSE,
             coord_offset=roi_offset,
@@ -535,8 +637,10 @@ def main():
             speed_txt = "N/A" if row["speed_m_per_s"] is None else f"{row['speed_m_per_s']:.4f} m/s"
             print(
                 f"#{row['index']:02d} pt=({row['point_x']},{row['point_y']}) "
-                f"len={row['length_px']}px angle={row['angle_probe_deg']}° "
-                f"slope={row['slope_px_per_frame']} px/frame speed={speed_txt} score={row['score']}"
+                f"len={row['length_px']}px step={row['spatial_sample_step']} "
+                f"samples={row['spatial_sample_count']} angle={row['angle_probe_deg']}° "
+                f"slope_sti={row['slope_sti']} sample/frame "
+                f"v_px/frame={row['velocity_px_per_frame_corrected']} speed={speed_txt} score={row['score']}"
             )
 
         overlay_results = results
@@ -570,6 +674,7 @@ def main():
         angle_end=ANGLE_END,
         angle_step=ANGLE_STEP,
         max_frames=MAX_FRAMES,
+        spatial_sample_step=SPATIAL_SAMPLE_STEP,
         start_frame=START_FRAME,
         start_time_sec=START_TIME_SEC,
         use_circular_roi=USE_ROI,
@@ -584,6 +689,10 @@ def main():
         vote_theta_res_deg=VOTE_THETA_RES_DEG,
         vote_k_ratio=VOTE_K_RATIO,
         vote_theta_range=VOTE_THETA_RANGE,
+        use_coarse_to_fine_theta=USE_COARSE_TO_FINE_THETA,
+        vote_theta_coarse_res_deg=VOTE_THETA_COARSE_RES_DEG,
+        vote_theta_fine_res_deg=VOTE_THETA_FINE_RES_DEG,
+        vote_theta_fine_half_width_deg=VOTE_THETA_FINE_HALF_WIDTH_DEG,
         top_k_candidates=TOP_K_CANDIDATES,
         k_sigma=K_SIGMA,
         score_mode=SCORE_MODE,
@@ -601,7 +710,7 @@ def main():
         print(f"[fps] 视频 FPS={best['fps']:.6f}")
 
     # 叠加到首帧预览图
-    slope = best["slope"]      # dx/dy (px/frame)
+    slope = best["slope"]      # dx/dy (STI sample/frame)
     save_flow_overlay(
         video_path=process_video,
         outdir=outdir,
@@ -609,6 +718,8 @@ def main():
         best_angle_deg=best.get("angle_probe", best["angle"]),
         length_px=LENGTH_PX,
         slope_px_per_frame=slope,
+        spatial_sample_step=SPATIAL_SAMPLE_STEP,
+        spatial_sample_count=spatial_count,
         m_per_px=m_per_px,
         fps=best.get("fps"),
         calib_xyxy=calib_line_proc,
@@ -621,6 +732,10 @@ def main():
     # 打印结果与速度换算
     print("\n====== 最终结果 ======")
     print(f"中心点: {CENTER}")
+    print(f"LENGTH_PX: {LENGTH_PX} px")
+    print(f"SPATIAL_SAMPLE_STEP: {SPATIAL_SAMPLE_STEP}")
+    print(f"spatial_sample_count: {spatial_count}")
+    print(f"MAX_FRAMES: {MAX_FRAMES}")
     #print(f"最佳条纹角度: {best['angle']} °")
 
     print(f"测速线方向: {best.get('angle_probe'):} °")
@@ -632,22 +747,45 @@ def main():
     if best.get("peak_ratio") is not None:
         print(f"主峰占比(peak_ratio): {best['peak_ratio']:.4f}")
     print(f"用于筛选的得分: {best['score']:.4f}" if best.get("score_mode") == "peak_ratio" else f"用于筛选的得分: {best['score']:.1f}")
-    print(f"STI 斜率 slope (px/frame): {best['slope'] if best['slope'] is not None else 'None'}")
-    if best["slope"] is not None and best.get("fps"):
-        v_pxps = best["slope"] * best["fps"]
-        print(f"像素速度: {v_pxps:.4f} px/s   (slope={best['slope']:.6f} px/frame, FPS={best['fps']:.3f})")
+    slope_sti = best.get("slope_sti", best["slope"])
+    velocity_px_per_frame = best.get("velocity_px_per_frame_corrected")
+    if velocity_px_per_frame is None:
+        velocity_px_per_frame = _correct_velocity_px_per_frame(slope_sti, SPATIAL_SAMPLE_STEP)
+
+    print(f"STI 斜率 slope_sti (sample/frame): {slope_sti if slope_sti is not None else 'None'}")
+    print(f"校正后像素速度 velocity_px_per_frame_corrected: {velocity_px_per_frame if velocity_px_per_frame is not None else 'None'} px/frame")
+    if velocity_px_per_frame is not None and best.get("fps"):
+        v_pxps = velocity_px_per_frame * best["fps"]
+        print(
+            f"像素速度: {v_pxps:.4f} px/s   "
+            f"(velocity_px_per_frame={velocity_px_per_frame:.6f}, FPS={best['fps']:.3f})"
+        )
     else:
-        print("未计算像素速度：缺少 slope 或 FPS。")
+        print("未计算像素速度：缺少 slope_sti 或 FPS。")
     if USE_M_MONO:
         print(f"M_mono 单调性评分: {best.get('M_mono')}")
     if USE_E_ASYM:
         print(f"E_asym 对称性评分: {best.get('E_asym')}")
 
-    if m_per_px is not None and best["slope"] is not None and best.get("fps"):
-        v_mps = best["slope"] * m_per_px * best["fps"]
-        print(f"速度估计: {v_mps:.4f} m/s   (slope={best['slope']:.6f} px/frame, m/px={m_per_px:.6f}, FPS={best['fps']:.3f})")
+    v_mps = _velocity_mps(velocity_px_per_frame, m_per_px, best.get("fps"))
+    if v_mps is not None:
+        print(
+            f"速度估计: {v_mps:.4f} m/s   "
+            f"(velocity_px_per_frame={velocity_px_per_frame:.6f}, "
+            f"m/px={m_per_px:.6f}, FPS={best['fps']:.3f})"
+        )
     else:
-        print("未计算速度：缺少 slope 或 m/px 或 FPS。")
+        print("未计算速度：缺少 velocity_px_per_frame_corrected 或 m/px 或 FPS。")
+
+    save_single_summary(
+        outdir,
+        best,
+        length_px=LENGTH_PX,
+        spatial_sample_step=SPATIAL_SAMPLE_STEP,
+        spatial_sample_count_value=spatial_count,
+        max_frames=MAX_FRAMES,
+        m_per_px=m_per_px,
+    )
 
     # 耗时统计
     n_lines = best.get("num_lines", 0)

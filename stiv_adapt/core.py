@@ -68,22 +68,48 @@ def _save_img(name: str, img: np.ndarray) -> str:
     return path
 
 # === STI 构建 ===
-def _line_sample_maps(center: Tuple[int, int], length_px: int, angle_deg: float) -> Tuple[np.ndarray, np.ndarray]:
+def spatial_sample_count(length_px: int, spatial_sample_step: int = 1) -> int:
+    """Return the number of STI spatial samples after line-direction sampling."""
+    length_px = int(length_px)
+    spatial_sample_step = int(spatial_sample_step)
+    if length_px <= 0:
+        raise ValueError("length_px 必须为正数")
+    if spatial_sample_step <= 0:
+        raise ValueError("SPATIAL_SAMPLE_STEP 必须为正数")
+    if length_px % spatial_sample_step != 0:
+        raise ValueError(
+            f"LENGTH_PX={length_px} 不能被 SPATIAL_SAMPLE_STEP={spatial_sample_step} 整除，"
+            "请调整参数以避免 STI 空间维度混乱"
+        )
+    return length_px // spatial_sample_step
+
+
+def _line_sample_maps(center: Tuple[int, int],
+                      length_px: int,
+                      angle_deg: float,
+                      spatial_sample_step: int = 1) -> Tuple[np.ndarray, np.ndarray]:
     """生成采样线的 remap 坐标映射。"""
     cx, cy = center
     half = length_px / 2.0
     theta = math.radians(angle_deg)
     dx = math.cos(theta); dy = math.sin(theta)
-    xs = np.linspace(cx - half * dx, cx + half * dx, num=length_px, dtype=np.float32)
-    ys = np.linspace(cy - half * dy, cy + half * dy, num=length_px, dtype=np.float32)
-    map_x = xs.reshape(1, length_px); map_y = ys.reshape(1, length_px)
+    sample_count = spatial_sample_count(length_px, spatial_sample_step)
+    if int(spatial_sample_step) == 1:
+        xs = np.linspace(cx - half * dx, cx + half * dx, num=length_px, dtype=np.float32)
+        ys = np.linspace(cy - half * dy, cy + half * dy, num=length_px, dtype=np.float32)
+    else:
+        offsets = (np.arange(sample_count, dtype=np.float32) - sample_count / 2.0) * float(spatial_sample_step)
+        xs = (cx + offsets * dx).astype(np.float32)
+        ys = (cy + offsets * dy).astype(np.float32)
+    map_x = xs.reshape(1, sample_count); map_y = ys.reshape(1, sample_count)
     return map_x, map_y
 
 def build_sti_from_frames(frames_gray: List[np.ndarray], center: Tuple[int, int],
-                          length_px: int, angle_deg: float) -> Optional[np.ndarray]:
+                          length_px: int, angle_deg: float,
+                          spatial_sample_step: int = 1) -> Optional[np.ndarray]:
     """从帧序列构建 STI 图像。"""
     if len(frames_gray) == 0: return None
-    map_x, map_y = _line_sample_maps(center, length_px, angle_deg)
+    map_x, map_y = _line_sample_maps(center, length_px, angle_deg, spatial_sample_step)
     rows = []
     for g in frames_gray:
         row = cv2.remap(g, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
@@ -163,7 +189,7 @@ def hough_voting_angle_and_slope(sti_u8: np.ndarray,
         cv2.putText(vis, "no votes", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                     (0, 255, 255), 2, cv2.LINE_AA)
         _save_img(save_name, vis)
-        if verbose: print("[voting] empty votes")
+        if verbose: print("[投票] 无有效投票")
         return 0.0, None, None
 
     peak_idx = int(np.argmax(votes_full))
@@ -182,12 +208,12 @@ def hough_voting_angle_and_slope(sti_u8: np.ndarray,
     x2 = int(round(cx + L * ux)); y2 = int(round(cy + L * uy))
     cv2.line(vis, (x1, y1), (x2, y2), (0, 255, 255), 2, cv2.LINE_AA)
     cv2.putText(vis,
-                f"theta_n={theta_normal_deg:.1f}deg, line={alpha_deg:.1f}deg, "
+                f"theta_n={theta_normal_deg:.2f}deg, line={alpha_deg:.2f}deg, "
                 f"slope={('None' if slope is None else f'{slope:.4f}')}, peak={score:.0f}",
                 (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0,255,255), 2, cv2.LINE_AA)
     _save_img(save_name, vis)
 
     if verbose:
-        print(f"[voting] peak θ(normal)={theta_normal_deg:.2f}°, line_dir={alpha_deg:.2f}°, "
+        print(f"[投票] 峰值 theta_normal={theta_normal_deg:.2f} deg, line_dir={alpha_deg:.2f} deg, "
               f"slope(px/frame)={('None' if slope is None else f'{slope:.6f}')}, peak={score:.0f}")
     return score, slope, alpha_deg

@@ -10,7 +10,7 @@ vote_accumulator.py — 角度投票统计（论文口径，固定双线性入�
   best_info: dict {'theta_deg','alpha_deg','votes}  # φ*、α*、与 φ*_lines
 """
 
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 import numpy as np
 
 
@@ -20,13 +20,19 @@ def hough_angle_voting_min(
     rho_step: float = 1.0,
     k_ratio: float = 0.55,
     verbose: bool = True,
+    *,
+    theta_range: Optional[Tuple[float, float]] = None,
 ) -> Tuple[int, List[Tuple[float, int]], np.ndarray, np.ndarray, int, Dict[str, float]]:
     """执行最小霍夫角度投票并返回统计结果。"""
     assert edge_u8.ndim == 2 and edge_u8.dtype == np.uint8, "edge image must be single-channel uint8"
     H, W = edge_u8.shape
 
     # 角度轴（法线角）
-    theta_axis = np.arange(0.0, 180.0, float(theta_res_deg), dtype=np.float32)
+    if theta_range is None:
+        theta_axis = np.arange(0.0, 180.0, float(theta_res_deg), dtype=np.float32)
+    else:
+        theta_min, theta_max = float(theta_range[0]), float(theta_range[1])
+        theta_axis = np.arange(theta_min, theta_max + 1e-3, float(theta_res_deg), dtype=np.float32)
     thetas = np.deg2rad(theta_axis)
     cos_t = np.cos(thetas)
     sin_t = np.sin(thetas)
@@ -91,9 +97,9 @@ def hough_angle_voting_min(
     best_info = {'theta_deg': theta_best, 'alpha_deg': alpha_best, 'votes': float(lines_best)}
 
     if verbose:
-        print(f"[RESULT] (H×W)={H}×{W} | theta_res_deg={theta_res_deg} | rho_step={rho_step} | k_ratio={k_ratio}")
-        print(f"[RESULT] ρ_max={rho_max} | ρ_bins={rho_bins} | K={K}")
-        print(f"[RESULT] φ* (theta_deg)={theta_best:.3f} | α*=φ*+90°={alpha_best:.3f} | φ*_lines={lines_best}")
-        print(f"[RESULT] total_lines(sum over θ of ≥K ρ-bins)={total_lines}")
+        print(f"[结果] HxW={H}x{W} | theta_res_deg={theta_res_deg} | rho_step={rho_step} | k_ratio={k_ratio}")
+        print(f"[结果] rho_max={rho_max} | rho_bins={rho_bins} | K={K}")
+        print(f"[结果] phi* (theta_deg)={theta_best:.3f} | alpha*=phi*+90deg={alpha_best:.3f} | phi*_lines={lines_best}")
+        print(f"[结果] total_lines(theta 上 >=K 的 rho-bins 总数)={total_lines}")
 
     return total_lines, angle_votes, votes_per_theta, theta_axis, rho_max, best_info

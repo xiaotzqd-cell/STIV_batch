@@ -8,7 +8,7 @@ import numpy as np
 from typing import Optional, Tuple, List, Dict
 
 # 亮度阈值默认值：集中放在顶部，便于统一调整
-DEFAULT_WEIGHT_MIN: float = 5.0
+DEFAULT_WEIGHT_MIN: float = 5
 DEFAULT_WEIGHT_MAX: float  = 255
 
 
@@ -133,6 +133,7 @@ def hough_angle_voting_weighted(
     verbose: bool = False,
     *,
     k_sigma: float = 1.0,
+    theta_range: Optional[Tuple[float, float]] = None,
 ) -> Tuple[float, List[Tuple[float, float]], np.ndarray, np.ndarray, int, Dict[str, float]]:
     """基于 Sobel 梯度幅值的“灰度加权”角度评分。
 
@@ -149,10 +150,15 @@ def hough_angle_voting_weighted(
     if use_circular_roi:
         roi_mask = build_circular_roi_mask(J.shape, radius_frac=roi_radius_frac)
 
+    if theta_range is None:
+        theta_min, theta_max = 0.0, 180.0
+    else:
+        theta_min, theta_max = float(theta_range[0]), float(theta_range[1])
+
     theta_axis, scores = hough_angle_score_weighted(
         J,
-        theta_min_deg=0.0,
-        theta_max_deg=180.0,
+        theta_min_deg=theta_min,
+        theta_max_deg=theta_max,
         theta_step_deg=float(theta_res_deg),
         rho_step=float(rho_step),
         weight_min=float(weight_min),
@@ -181,12 +187,12 @@ def hough_angle_voting_weighted(
     if verbose:
         rho_bins = int(np.floor((2 * rho_max) / rho_step) + 1)
         print(
-            f"[RESULT] (H×W)={H}×{W} | theta_res_deg={theta_res_deg} | rho_step={rho_step} | "
+            f"[RESULT] HxW={H}x{W} | theta_res_deg={theta_res_deg} | rho_step={rho_step} | "
             f"weight_min={weight_min} | weight_max={weight_max}"
         )
-        print(f"[RESULT] ρ_max={rho_max} | ρ_bins={rho_bins}")
+        print(f"[RESULT] rho_max={rho_max} | rho_bins={rho_bins}")
         print(
-            f"[RESULT] φ* (theta_deg)={theta_best:.3f} | α*=φ*+90°={alpha_best:.3f} | "
+            f"[RESULT] phi* (theta_deg)={theta_best:.3f} | alpha*=phi*+90deg={alpha_best:.3f} | "
             f"energy={votes_best:.1f}"
         )
 
